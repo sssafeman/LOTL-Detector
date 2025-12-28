@@ -1,0 +1,36 @@
+name: "Certutil Download Suspicious File"
+id: "WIN-001"
+platform: windows
+severity: high
+mitre_attack:
+  - T1105  # Ingress Tool Transfer
+  - T1140  # Deobfuscate/Decode Files or Information
+
+description: |
+  Detects certutil.exe being used to download files from the internet.
+  Commonly used by Lazarus Group and other APTs for payload delivery.
+  Certutil is a legitimate Windows certificate utility that has download
+  capabilities often abused by attackers.
+
+detection:
+  process_name: "certutil.exe"
+  command_contains:
+    - "-urlcache"
+    - "http"
+
+false_positives:
+  - "Certificate management by system administrators"
+  - "Automated certificate updates"
+  
+whitelist:
+  parent_processes:
+    - "msiexec.exe"
+    - "sccm.exe"
+  users:
+    - "SYSTEM"
+
+response:
+  - "Examine the downloaded file location and hash"
+  - "Check parent process legitimacy"
+  - "Review user account recent activity"
+  - "Scan endpoint for additional IOCs"

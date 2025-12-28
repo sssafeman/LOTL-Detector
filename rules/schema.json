@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LOTL Detection Rule",
+  "type": "object",
+  "required": ["name", "id", "platform", "severity", "detection"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Human-readable rule name"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^(WIN|LNX|MAC)-[0-9]{3}$",
+      "description": "Unique rule ID (WIN-001, LNX-001, MAC-001)"
+    },
+    "platform": {
+      "type": "string",
+      "enum": ["windows", "linux", "macos"],
+      "description": "Target operating system"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"],
+      "description": "Alert severity level"
+    },
+    "mitre_attack": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$"
+      },
+      "description": "MITRE ATT&CK technique IDs"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed explanation of what this detects"
+    },
+    "detection": {
+      "type": "object",
+      "description": "Detection logic",
+      "properties": {
+        "process_name": {
+          "type": "string"
+        },
+        "command_contains": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "command_regex": {
+          "type": "string"
+        },
+        "parent_process": {
+          "type": "string"
+        },
+        "user_pattern": {
+          "type": "string"
+        }
+      }
+    },
+    "false_positives": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Known legitimate use cases"
+    },
+    "whitelist": {
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "parent_processes": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "paths": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "response": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Recommended response actions"
+    }
+  }
+}
