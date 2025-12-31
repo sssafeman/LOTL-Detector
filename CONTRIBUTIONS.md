@@ -575,15 +575,6 @@ We certify that:
 5. All team members contributed substantially to the project
 6. Contribution percentages accurately reflect individual effort
 
-**Team Signatures:**
-
-- Said (Person 1 - Core Engine & Project Lead): _________________
-- Ali (Person 2 - Windows Collector): _________________
-- Shahmir (Person 3 - Linux Collector): _________________
-- Tamerlan (Person 4 - API & Dashboard): _________________
-
-**Date:** _______________
-
 ---
 
 ## Acknowledgments
