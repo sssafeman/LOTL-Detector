@@ -12,14 +12,113 @@ LOTL Detector identifies suspicious use of legitimate system utilities commonly 
 - macOS (Unified Logs) - Coming soon
 
 ## Architecture
+
 ```
-Detection Dashboard (Web UI)
-         ↓
-Core Detection Engine (rule matching, scoring)
-         ↓
-Platform Collectors (Windows, Linux, macOS)
-         ↓
-System Logs (Sysmon, auditd, etc.)
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           INTERFACE LAYER                                       │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│   ┌──────────────┐      ┌──────────────────┐      ┌──────────────────┐        │
+│   │   REST API   │      │  Web Dashboard   │      │    CLI Tool      │        │
+│   │   (Flask)    │      │ (HTML/CSS/JS)    │      │ demo_detector.py │        │
+│   └──────┬───────┘      └────────┬─────────┘      └────────┬─────────┘        │
+│          │                       │                         │                   │
+└──────────┼───────────────────────┼─────────────────────────┼───────────────────┘
+           │                       │                         │
+           └───────────────────────┴─────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        PERSISTENCE LAYER                                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│                        ┌──────────────────────────┐                            │
+│                        │   AlertDatabase          │                            │
+│                        │   (SQLite)               │                            │
+│                        │   - Stores alerts        │                            │
+│                        │   - Query capabilities   │                            │
+│                        │   - Metadata tracking    │                            │
+│                        └───────────▲──────────────┘                            │
+│                                    │                                            │
+└────────────────────────────────────┼────────────────────────────────────────────┘
+                                     │
+                                     │ Alert objects
+                                     │
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          DETECTION LAYER                                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌────────────────┐                                                            │
+│  │  RuleLoader    │──────┐                                                     │
+│  │  (YAML Rules)  │      │                                                     │
+│  └────────────────┘      │                                                     │
+│                          ▼                                                      │
+│         ┌────────────────────────────┐          ┌──────────────────┐          │
+│         │   DetectionEngine          │          │     Scorer       │          │
+│         │   - Rule matching          │─────────▶│  Risk: 0-150     │          │
+│         │   - Pattern detection      │          │  Severity-based  │          │
+│         │   - Whitelist filtering    │          └──────────────────┘          │
+│         └───────────▲────────────────┘                                         │
+│                     │                                                           │
+│                     │ Event objects                                             │
+└─────────────────────┼───────────────────────────────────────────────────────────┘
+                      │
+                      │
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        COLLECTION LAYER                                         │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│                     ┌──────────────────────────┐                               │
+│                     │     BaseCollector        │                               │
+│                     │  (Abstract Interface)    │                               │
+│                     └────────────┬─────────────┘                               │
+│                                  │                                              │
+│                     ┌────────────┴────────────┐                                │
+│                     │                         │                                │
+│          ┌──────────▼──────────┐   ┌─────────▼──────────┐                     │
+│          │  WindowsCollector   │   │  LinuxCollector    │                     │
+│          │  - Sysmon parser    │   │  - auditd parser   │                     │
+│          │  - Event ID 1       │   │  - EXECVE logs     │                     │
+│          │  - Process tracking │   │  - Process tracking│                     │
+│          └──────────▲──────────┘   └─────────▲──────────┘                     │
+│                     │                         │                                │
+└─────────────────────┼─────────────────────────┼────────────────────────────────┘
+                      │                         │
+                      │                         │
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        DATA SOURCES LAYER                                       │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│          ┌──────────────────────┐        ┌──────────────────────┐             │
+│          │   Sysmon Logs        │        │   auditd Logs        │             │
+│          │   (Windows)          │        │   (Linux)            │             │
+│          │   - Process creation │        │   - EXECVE events    │             │
+│          │   - Command lines    │        │   - System calls     │             │
+│          │   - Parent processes │        │   - User context     │             │
+│          └──────────────────────┘        └──────────────────────┘             │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+Legend:
+  ┌─────┐  Component/Module
+  │     │
+  └─────┘
+
+     │     Data flow direction (upward)
+     ▼
+
+     ▶     Transformation/processing
+
+  ───────  Inheritance/extension
+
+Data Flow:
+  1. System logs (Sysmon/auditd) → Collectors parse raw logs
+  2. Collectors → Event objects created and normalized
+  3. Events → DetectionEngine matches against loaded rules
+  4. DetectionEngine → Scorer assigns risk scores (0-150)
+  5. Scored matches → Alert objects generated
+  6. Alerts → AlertDatabase persists for querying
+  7. Database → Interface Layer serves alerts via API/Dashboard/CLI
 ```
 
 ## Project Status
