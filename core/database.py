@@ -49,7 +49,8 @@ class AlertDatabase:
         """Establish database connection"""
         self.connection = sqlite3.connect(
             str(self.db_path),
-            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+            check_same_thread=False  # Allow multi-threaded access for Flask
         )
         self.connection.row_factory = sqlite3.Row
         logger.debug(f"Connected to database: {self.db_path}")

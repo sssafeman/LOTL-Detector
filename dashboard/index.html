@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LOTL Detector Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="header-left">
+                    <h1>⚡ LOTL Detector Dashboard</h1>
+                    <div class="status-indicator">
+                        <span class="status-dot" id="statusDot"></span>
+                        <span id="statusText">Connecting...</span>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="alert-badge" id="totalAlertsBadge">
+                        <span class="badge-number">0</span>
+                        <span class="badge-label">Total Alerts</span>
+                    </div>
+                    <div class="last-updated">
+                        Last updated: <span id="lastUpdated">Never</span>
+                    </div>
+                    <button class="btn-refresh" id="refreshBtn" title="Refresh data">
+                        <span class="refresh-icon">↻</span> Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="container">
+            <div class="dashboard-grid">
+                <!-- Left Sidebar - Filters -->
+                <aside class="filters-panel">
+                    <h2>Filters</h2>
+                    
+                    <div class="filter-group">
+                        <label for="severityFilter">Severity</label>
+                        <select id="severityFilter" class="filter-input">
+                            <option value="">All Severities</option>
+                            <option value="critical">Critical</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="platformFilter">Platform</label>
+                        <select id="platformFilter" class="filter-input">
+                            <option value="">All Platforms</option>
+                            <option value="windows">Windows</option>
+                            <option value="linux">Linux</option>
+                            <option value="macos">macOS</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="scoreFilter">
+                            Minimum Score: <span id="scoreValue">0</span>
+                        </label>
+                        <input type="range" id="scoreFilter" class="filter-slider" 
+                               min="0" max="150" value="0" step="5">
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="timeFilter">Time Range</label>
+                        <select id="timeFilter" class="filter-input">
+                            <option value="1">Last Hour</option>
+                            <option value="24" selected>Last 24 Hours</option>
+                            <option value="168">Last 7 Days</option>
+                            <option value="720">Last 30 Days</option>
+                            <option value="all">All Time</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-buttons">
+                        <button class="btn-primary" id="applyFiltersBtn">Apply Filters</button>
+                        <button class="btn-secondary" id="clearFiltersBtn">Clear Filters</button>
+                    </div>
+
+                    <div class="export-section">
+                        <h3>Export</h3>
+                        <button class="btn-secondary btn-small" id="exportJsonBtn">Export JSON</button>
+                        <button class="btn-secondary btn-small" id="exportCsvBtn">Export CSV</button>
+                    </div>
+                </aside>
+
+                <!-- Main Dashboard Content -->
+                <div class="dashboard-main">
+                    <!-- Statistics Cards -->
+                    <section class="stats-cards">
+                        <div class="stat-card">
+                            <div class="stat-icon">📊</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="statTotal">0</div>
+                                <div class="stat-label">Total Alerts</div>
+                                <div class="stat-trend" id="statTotalTrend"></div>
+                            </div>
+                        </div>
+
+                        <div class="stat-card stat-critical">
+                            <div class="stat-icon">🔴</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="statCritical">0</div>
+                                <div class="stat-label">Critical</div>
+                            </div>
+                        </div>
+
+                        <div class="stat-card stat-high">
+                            <div class="stat-icon">🟠</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="statHigh">0</div>
+                                <div class="stat-label">High</div>
+                            </div>
+                        </div>
+
+                        <div class="stat-card stat-medium">
+                            <div class="stat-icon">🟡</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="statMedium">0</div>
+                                <div class="stat-label">Medium</div>
+                            </div>
+                        </div>
+
+                        <div class="stat-card stat-low">
+                            <div class="stat-icon">🔵</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="statLow">0</div>
+                                <div class="stat-label">Low</div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Charts Row -->
+                    <section class="charts-row">
+                        <div class="chart-card">
+                            <h3>Score Distribution</h3>
+                            <div class="chart-container" id="scoreChart"></div>
+                        </div>
+
+                        <div class="chart-card">
+                            <h3>Platform Distribution</h3>
+                            <div class="chart-container" id="platformChart"></div>
+                        </div>
+                    </section>
+
+                    <!-- Recent Alerts Table -->
+                    <section class="alerts-table-section">
+                        <div class="section-header">
+                            <h2>Recent Alerts</h2>
+                            <div class="table-controls">
+                                <span id="alertsCount">0 alerts</span>
+                            </div>
+                        </div>
+                        
+                        <div class="table-wrapper">
+                            <table class="alerts-table" id="alertsTable">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable" data-sort="timestamp">Time</th>
+                                        <th class="sortable" data-sort="severity">Severity</th>
+                                        <th class="sortable" data-sort="score">Score</th>
+                                        <th class="sortable" data-sort="rule_name">Rule</th>
+                                        <th>Platform</th>
+                                        <th>Process</th>
+                                        <th>Command</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="alertsTableBody">
+                                    <tr class="loading-row">
+                                        <td colspan="7">Loading alerts...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="pagination" id="pagination">
+                            <button class="btn-page" id="prevPage">← Previous</button>
+                            <span id="pageInfo">Page 1</span>
+                            <button class="btn-page" id="nextPage">Next →</button>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Alert Detail Modal -->
+    <div class="modal" id="alertModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Alert Details</h2>
+                <button class="modal-close" id="modalClose">×</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Content will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Toast -->
+    <div class="toast" id="errorToast">
+        <span id="toastMessage"></span>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
