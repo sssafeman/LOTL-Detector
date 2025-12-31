@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from collectors.base import Event
 from core.rule_loader import Rule
+from core.scorer import Scorer
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class Alert:
     mitre_attack: List[str]
     description: str
     response: List[str]
+    score: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert alert to dictionary for storage/API"""
@@ -36,11 +38,12 @@ class Alert:
             'mitre_attack': self.mitre_attack,
             'description': self.description,
             'response': self.response,
+            'score': self.score,
             'event': self.event.to_dict()
         }
 
     def __repr__(self):
-        return f"Alert(rule_id={self.rule_id}, severity={self.severity}, process={self.event.process_name})"
+        return f"Alert(rule_id={self.rule_id}, severity={self.severity}, score={self.score}, process={self.event.process_name})"
 
 
 class DetectionEngine:
@@ -56,6 +59,7 @@ class DetectionEngine:
             rules: List of Rule objects to match against
         """
         self.rules = rules
+        self.scorer = Scorer()
         logger.info(f"Detection engine initialized with {len(rules)} rules")
 
     def match_event(self, event: Event) -> List[Alert]:
@@ -82,6 +86,9 @@ class DetectionEngine:
                     logger.debug(f"Event whitelisted for rule {rule.id}: {event.process_name}")
                     continue
 
+                # Calculate score
+                score = self.scorer.score_alert(rule, event)
+
                 # Create alert
                 alert = Alert(
                     rule_id=rule.id,
@@ -91,10 +98,11 @@ class DetectionEngine:
                     timestamp=event.timestamp,
                     mitre_attack=rule.mitre_attack,
                     description=rule.description,
-                    response=rule.response
+                    response=rule.response,
+                    score=score
                 )
                 alerts.append(alert)
-                logger.info(f"Alert generated: {rule.id} - {rule.name} for process {event.process_name}")
+                logger.info(f"Alert generated: {rule.id} - {rule.name} (score: {score}) for process {event.process_name}")
 
         return alerts
 
