@@ -1,0 +1,5 @@
+type=SYSCALL msg=audit(1642270200.123:3501): arch=c000003e syscall=59 success=yes exit=0 a0=7ffd88776655 a1=7ffd88776670 a2=7ffd88776680 a3=0 items=2 ppid=6789 pid=65432 auid=1002 uid=1002 gid=1002 euid=1002 suid=1002 fsuid=1002 egid=1002 sgid=1002 fsgid=1002 tty=pts3 ses=9 comm="ssh" exe="/usr/bin/ssh" key=(null)
+type=EXECVE msg=audit(1642270200.123:3501): argc=5 a0="ssh" a1="-o" a2="ProxyCommand=bash -i" a3="user@target" a4="-D" a5="9050"
+type=CWD msg=audit(1642270200.123:3501): cwd="/home/attacker"
+type=PATH msg=audit(1642270200.123:3501): item=0 name="/usr/bin/ssh" inode=234567 dev=08:01 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+type=PROCTITLE msg=audit(1642270200.123:3501): proctitle=7373680020446F

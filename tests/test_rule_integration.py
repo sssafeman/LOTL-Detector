@@ -290,23 +290,71 @@ class TestLinuxRuleIntegration:
         assert 100 <= cron_alert.score <= 150, f"Score {cron_alert.score} should be in range 100-150"
         assert "T1053.003" in cron_alert.mitre_attack, "Should include T1053.003 MITRE technique"
 
-    @pytest.mark.skip(reason="Fixture not yet created for LNX-004")
     def test_lnx004_ssh_suspicious_triggers_on_fixture(self, linux_collector, detection_engine):
         """LNX-004: SSH with suspicious flags should trigger on fixture"""
-        # TODO: Create ssh_suspicious.log fixture
-        pass
+        # Load and parse fixture
+        fixture_path = LINUX_FIXTURES / "ssh_suspicious.log"
+        events = linux_collector.collect_events(str(fixture_path))
 
-    @pytest.mark.skip(reason="Fixture not yet created for LNX-005")
+        assert len(events) == 1, "Should parse exactly one event"
+
+        # Run detection
+        alerts = detection_engine.match_event(events[0])
+
+        assert len(alerts) > 0, "Should generate at least one alert"
+
+        # Find the SSH alert
+        ssh_alert = next((a for a in alerts if a.rule_id == "LNX-004"), None)
+        assert ssh_alert is not None, "Should trigger LNX-004 rule"
+
+        # Verify alert properties
+        assert ssh_alert.severity == "medium", "Should have MEDIUM severity"
+        assert 50 <= ssh_alert.score <= 100, f"Score {ssh_alert.score} should be in range 50-100"
+        assert "T1021.004" in ssh_alert.mitre_attack, "Should include T1021.004 MITRE technique"
+
     def test_lnx005_base64_decode_triggers_on_fixture(self, linux_collector, detection_engine):
         """LNX-005: Base64 decode piped to shell should trigger on fixture"""
-        # TODO: Create base64_decode.log fixture
-        pass
+        # Load and parse fixture
+        fixture_path = LINUX_FIXTURES / "base64_decode.log"
+        events = linux_collector.collect_events(str(fixture_path))
 
-    @pytest.mark.skip(reason="Fixture not yet created for LNX-006")
+        assert len(events) == 1, "Should parse exactly one event"
+
+        # Run detection
+        alerts = detection_engine.match_event(events[0])
+
+        assert len(alerts) > 0, "Should generate at least one alert"
+
+        # Find the base64 decode alert
+        base64_alert = next((a for a in alerts if a.rule_id == "LNX-005"), None)
+        assert base64_alert is not None, "Should trigger LNX-005 rule"
+
+        # Verify alert properties
+        assert base64_alert.severity == "high", "Should have HIGH severity"
+        assert 100 <= base64_alert.score <= 150, f"Score {base64_alert.score} should be in range 100-150"
+        assert "T1027" in base64_alert.mitre_attack, "Should include T1027 MITRE technique"
+
     def test_lnx006_netcat_listener_triggers_on_fixture(self, linux_collector, detection_engine):
         """LNX-006: Netcat listening should trigger on fixture"""
-        # TODO: Create netcat_listener.log fixture
-        pass
+        # Load and parse fixture
+        fixture_path = LINUX_FIXTURES / "netcat_listener.log"
+        events = linux_collector.collect_events(str(fixture_path))
+
+        assert len(events) == 1, "Should parse exactly one event"
+
+        # Run detection
+        alerts = detection_engine.match_event(events[0])
+
+        assert len(alerts) > 0, "Should generate at least one alert"
+
+        # Find the netcat listener alert
+        nc_alert = next((a for a in alerts if a.rule_id == "LNX-006"), None)
+        assert nc_alert is not None, "Should trigger LNX-006 rule"
+
+        # Verify alert properties
+        assert nc_alert.severity == "high", "Should have HIGH severity"
+        assert 100 <= nc_alert.score <= 150, f"Score {nc_alert.score} should be in range 100-150"
+        assert "T1071" in nc_alert.mitre_attack, "Should include T1071 MITRE technique"
 
 
 class TestRuleLoadingIntegration:
@@ -381,7 +429,10 @@ class TestRuleLoadingIntegration:
             "benign_curl.log",
             "malicious_curl.log",
             "reverse_shell.log",
-            "cron_persistence.log"
+            "cron_persistence.log",
+            "ssh_suspicious.log",
+            "base64_decode.log",
+            "netcat_listener.log"
         ]
 
         for fixture in fixtures:
