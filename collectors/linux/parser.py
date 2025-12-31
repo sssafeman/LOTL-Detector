@@ -3,7 +3,7 @@ Helper functions for parsing Linux auditd logs
 """
 import re
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)

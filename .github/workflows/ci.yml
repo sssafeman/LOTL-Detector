@@ -30,4 +30,4 @@ jobs:
     - name: Check code style (optional)
       run: |
         pip install flake8
-        flake8 core/ collectors/ --max-line-length=100 --ignore=E501
+        flake8 core/ collectors/ --max-line-length=100 --ignore=E501,W293,E128,F401

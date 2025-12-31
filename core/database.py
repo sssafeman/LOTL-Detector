@@ -4,7 +4,7 @@ Database module for persistent alert storage
 import sqlite3
 import json
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from pathlib import Path
 from core.engine import Alert
 import logging

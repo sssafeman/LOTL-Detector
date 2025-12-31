@@ -25,15 +25,15 @@ class Event:
     parent_process_name: Optional[str] = None
     parent_process_id: Optional[int] = None
     working_directory: Optional[str] = None
-    
+
     # Additional context
     raw_data: Dict[str, Any] = None  # Original log entry
-    
+
     def __post_init__(self):
         """Ensure raw_data is always a dict"""
         if self.raw_data is None:
             self.raw_data = {}
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert event to dictionary for storage/API"""
         return {
@@ -57,7 +57,7 @@ class BaseCollector(ABC):
     Each platform (Windows, Linux, macOS) implements this interface.
     This ensures consistent behavior across all collectors.
     """
-    
+
     def __init__(self, config: Dict[str, Any] = None):
         """
         Initialize collector
@@ -67,7 +67,7 @@ class BaseCollector(ABC):
         """
         self.config = config or {}
         self.logger = logging.getLogger(self.__class__.__name__)
-    
+
     @abstractmethod
     def get_platform(self) -> str:
         """
@@ -77,9 +77,9 @@ class BaseCollector(ABC):
             One of: 'windows', 'linux', 'macos'
         """
         pass
-    
+
     @abstractmethod
-    def collect_events(self, source: str, start_time: datetime = None, 
+    def collect_events(self, source: str, start_time: datetime = None,
                        end_time: datetime = None) -> List[Event]:
         """
         Collect events from log source
@@ -98,7 +98,7 @@ class BaseCollector(ABC):
             ValueError: If source format is invalid
         """
         pass
-    
+
     @abstractmethod
     def parse_event(self, raw_event: Any) -> Event:
         """
@@ -111,7 +111,7 @@ class BaseCollector(ABC):
             Event object
         """
         pass
-    
+
     def validate_source(self, source: str) -> bool:
         """
         Validate that log source exists and is readable
@@ -127,23 +127,23 @@ class BaseCollector(ABC):
             PermissionError: If can't read source
         """
         from pathlib import Path
-        
+
         source_path = Path(source)
-        
+
         if not source_path.exists():
             raise FileNotFoundError(f"Log source not found: {source}")
-        
+
         if not source_path.is_file() and not source_path.is_dir():
             raise ValueError(f"Invalid source (must be file or directory): {source}")
-        
+
         # Try to read (will raise PermissionError if no access)
         if source_path.is_file():
             with open(source_path, 'r'):
                 pass
-        
+
         return True
-    
-    def filter_events_by_time(self, events: List[Event], 
+
+    def filter_events_by_time(self, events: List[Event],
                              start_time: datetime = None,
                              end_time: datetime = None) -> List[Event]:
         """
@@ -158,15 +158,15 @@ class BaseCollector(ABC):
             Filtered list of events
         """
         filtered = events
-        
+
         if start_time:
             filtered = [e for e in filtered if e.timestamp >= start_time]
-        
+
         if end_time:
             filtered = [e for e in filtered if e.timestamp <= end_time]
-        
+
         return filtered
-    
+
     def get_stats(self, events: List[Event]) -> Dict[str, Any]:
         """
         Get statistics about collected events
@@ -179,7 +179,7 @@ class BaseCollector(ABC):
         """
         if not events:
             return {'total': 0}
-        
+
         return {
             'total': len(events),
             'earliest': min(e.timestamp for e in events),

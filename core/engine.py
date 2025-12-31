@@ -4,7 +4,7 @@ Detection engine - matches events against rules to generate alerts
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from collectors.base import Event
 from core.rule_loader import Rule
 from core.scorer import Scorer

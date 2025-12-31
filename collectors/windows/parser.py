@@ -3,8 +3,7 @@ Helper functions for parsing Sysmon and Windows Event logs
 """
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from typing import Dict, Any, Optional
-from pathlib import Path
+from typing import Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)

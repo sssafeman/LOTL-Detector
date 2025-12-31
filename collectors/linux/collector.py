@@ -3,7 +3,7 @@ Linux event collector - parses auditd logs
 """
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Any, Optional
 from collections import defaultdict
 from collectors.base import BaseCollector, Event
 from collectors.linux.parser import (

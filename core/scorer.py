@@ -1,7 +1,7 @@
 """
 Alert scoring module - calculates risk scores for detected alerts
 """
-from typing import Dict, Any, List
+from typing import Dict
 from core.rule_loader import Rule
 from collectors.base import Event
 import logging

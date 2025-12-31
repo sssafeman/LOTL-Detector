@@ -3,7 +3,7 @@ Windows event collector - parses Sysmon and Windows Event logs
 """
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Any
 from collectors.base import BaseCollector, Event
 from collectors.windows.parser import (
     parse_sysmon_xml,
