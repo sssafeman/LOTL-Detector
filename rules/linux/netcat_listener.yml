@@ -1,0 +1,29 @@
+name: "Netcat Listening for Connections"
+id: "LNX-006"
+platform: linux
+severity: high
+mitre_attack:
+  - T1071  # Application Layer Protocol
+  - T1059.004  # Unix Shell
+
+description: |
+  Detects netcat (nc) being used to listen for incoming connections.
+  This is commonly used to establish backdoors or receive reverse shells.
+  The -l flag indicates listening mode, and when combined with shell
+  execution, represents a clear persistence or backdoor mechanism.
+
+detection:
+  process_name: "nc"
+  command_contains:
+    - "-l"
+
+false_positives:
+  - "Network debugging by system administrators"
+  - "Legitimate network testing tools"
+
+response:
+  - "Identify the listening port"
+  - "Check if port is exposed externally"
+  - "Kill the netcat process immediately"
+  - "Review user account for compromise"
+  - "Check for other persistence mechanisms"

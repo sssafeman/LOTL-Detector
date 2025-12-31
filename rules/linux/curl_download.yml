@@ -1,0 +1,33 @@
+name: "Curl/Wget Downloading Suspicious Script"
+id: "LNX-001"
+platform: linux
+severity: high
+mitre_attack:
+  - T1105  # Ingress Tool Transfer
+  - T1059.004  # Unix Shell
+
+description: |
+  Detects curl or wget being used to download scripts from the internet.
+  Commonly used by attackers for initial payload delivery or downloading
+  post-exploitation tools. Legitimate downloads are usually from package
+  managers or automated update systems.
+
+detection:
+  command_regex: "(curl|wget).*(http://|https://|ftp://).*\\.(sh|pl|py|rb)"
+
+false_positives:
+  - "System package managers downloading updates"
+  - "Legitimate automated deployment scripts"
+
+whitelist:
+  users:
+    - "root"
+  paths:
+    - "/var/lib/apt"
+    - "/usr/lib/update-manager"
+
+response:
+  - "Identify the URL being downloaded and check reputation"
+  - "Examine the downloaded file if it exists"
+  - "Review user account recent activity"
+  - "Check for subsequent suspicious processes"

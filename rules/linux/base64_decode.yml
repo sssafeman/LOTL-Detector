@@ -1,0 +1,26 @@
+name: "Base64 Decode Piped to Shell"
+id: "LNX-005"
+platform: linux
+severity: high
+mitre_attack:
+  - T1027  # Obfuscated Files or Information
+  - T1059.004  # Unix Shell
+
+description: |
+  Detects base64 decoding piped directly to a shell interpreter.
+  This technique is commonly used to execute obfuscated commands or
+  scripts without writing them to disk. Attackers use this to evade
+  detection by file-based security tools.
+
+detection:
+  command_regex: "base64\\s+-d.*\\||echo.*base64.*\\|.*(bash|sh)"
+
+false_positives:
+  - "Legitimate deployment scripts using base64 encoding"
+  - "Application installation processes"
+
+response:
+  - "Decode the base64 string to see the actual command"
+  - "Identify the source of the encoded command"
+  - "Check for other obfuscation techniques in use"
+  - "Review process tree for suspicious parent processes"

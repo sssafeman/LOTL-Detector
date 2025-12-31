@@ -1,0 +1,27 @@
+name: "SSH with Suspicious Flags"
+id: "LNX-004"
+platform: linux
+severity: medium
+mitre_attack:
+  - T1021.004  # Remote Services: SSH
+  - T1572  # Protocol Tunneling
+
+description: |
+  Detects SSH being used with flags that may indicate tunneling,
+  port forwarding, or other suspicious activities. Includes dynamic
+  port forwarding (-D), local port forwarding (-L), remote port
+  forwarding (-R), and command execution (-o).
+
+detection:
+  process_name: "ssh"
+  command_regex: "ssh.*(\\s-[DLR]\\s|ProxyCommand|\\s-o\\s)"
+
+false_positives:
+  - "System administrators using SSH tunnels for legitimate purposes"
+  - "Automated SSH scripts with specific configurations"
+
+response:
+  - "Identify the destination host and port"
+  - "Check if the user has legitimate need for SSH tunneling"
+  - "Review firewall logs for unusual connections"
+  - "Monitor for data exfiltration"

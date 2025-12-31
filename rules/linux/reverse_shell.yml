@@ -1,0 +1,26 @@
+name: "Bash/Netcat Reverse Shell"
+id: "LNX-002"
+platform: linux
+severity: critical
+mitre_attack:
+  - T1059.004  # Unix Shell
+  - T1071.001  # Application Layer Protocol: Web Protocols
+
+description: |
+  Detects reverse shell patterns using bash, sh, or netcat.
+  These are common post-exploitation techniques used to establish
+  command and control. Patterns include bash -i redirects, netcat
+  with /bin/sh pipes, and similar shell redirection attacks.
+
+detection:
+  command_regex: "(bash|sh|nc|ncat).*(>|<).*/(tcp|udp|dev)|/bin/(ba)?sh.*0<&1|exec.*/(tcp|udp)"
+
+false_positives:
+  - "Rare - reverse shells are almost always malicious"
+
+response:
+  - "IMMEDIATE: Isolate the affected system"
+  - "Kill the suspicious process"
+  - "Review all user sessions and connections"
+  - "Check for persistence mechanisms"
+  - "Perform full forensic analysis"

@@ -1,0 +1,31 @@
+name: "Crontab Modification for Persistence"
+id: "LNX-003"
+platform: linux
+severity: high
+mitre_attack:
+  - T1053.003  # Scheduled Task/Job: Cron
+
+description: |
+  Detects modifications to crontab for persistence.
+  Attackers often use crontab to maintain persistence by scheduling
+  malicious scripts or commands to run periodically. This includes
+  both user crontabs and system-wide cron modifications.
+
+detection:
+  process_name: "crontab"
+  command_contains:
+    - "-e"
+
+false_positives:
+  - "Legitimate system administrators modifying scheduled tasks"
+  - "Automated deployment scripts"
+
+whitelist:
+  users:
+    - "root"
+
+response:
+  - "Review the crontab contents for suspicious entries"
+  - "Check what user's crontab was modified"
+  - "Look for recently added cron jobs"
+  - "Examine any scripts referenced in new cron entries"
