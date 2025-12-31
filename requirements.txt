@@ -6,6 +6,7 @@ packaging==25.0
 pluggy==1.6.0
 Pygments==2.19.2
 pytest==9.0.2
+python-evtx==0.7.4
 PyYAML==6.0.3
 referencing==0.37.0
 rpds-py==0.30.0

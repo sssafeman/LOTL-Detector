@@ -1,0 +1,42 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>1</EventID>
+    <Version>5</Version>
+    <Level>4</Level>
+    <Task>1</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2025-01-15T16:20:15.555555Z" />
+    <EventRecordID>67890</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="3456" ThreadID="7890" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>LAPTOP-USER02</Computer>
+    <Security UserID="S-1-5-21-987654321-987654321-987654321-1002" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">-</Data>
+    <Data Name="UtcTime">2025-01-15 16:20:15.555</Data>
+    <Data Name="ProcessGuid">{11223344-5566-7788-99aa-bbccddeeff00}</Data>
+    <Data Name="ProcessId">0x7b</Data>
+    <Data Name="Image">C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Data>
+    <Data Name="FileVersion">10.0.19041.1</Data>
+    <Data Name="Description">Windows PowerShell</Data>
+    <Data Name="Product">Microsoft Windows Operating System</Data>
+    <Data Name="Company">Microsoft Corporation</Data>
+    <Data Name="OriginalFileName">PowerShell.EXE</Data>
+    <Data Name="CommandLine">powershell.exe -ExecutionPolicy Bypass -EncodedCommand JABjAGwAaQBlAG4AdAAgAD0AIABOAGUAdwAtAE8AYgBqAGUAYwB0ACAAUwB5AHMAdABlAG0ALgBOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0AA==</Data>
+    <Data Name="CurrentDirectory">C:\Windows\System32\</Data>
+    <Data Name="User">LAPTOP-USER02\SuspiciousUser</Data>
+    <Data Name="LogonGuid">{11223344-5566-7788-99aa-bbccddeeff01}</Data>
+    <Data Name="LogonId">0x54321</Data>
+    <Data Name="TerminalSessionId">2</Data>
+    <Data Name="IntegrityLevel">High</Data>
+    <Data Name="Hashes">SHA256=FEDCBA987654</Data>
+    <Data Name="ParentProcessGuid">{11223344-5566-7788-99aa-bbccddeeff02}</Data>
+    <Data Name="ParentProcessId">0x1f4</Data>
+    <Data Name="ParentImage">C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE</Data>
+    <Data Name="ParentCommandLine">"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE" /n "C:\Users\SuspiciousUser\Documents\document.docx"</Data>
+  </EventData>
+</Event>

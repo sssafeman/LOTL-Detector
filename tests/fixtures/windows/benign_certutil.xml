@@ -1,0 +1,42 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>1</EventID>
+    <Version>5</Version>
+    <Level>4</Level>
+    <Task>1</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2025-01-15T10:30:00.123456Z" />
+    <EventRecordID>12345</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="1234" ThreadID="5678" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>WORKSTATION01</Computer>
+    <Security UserID="S-1-5-18" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">-</Data>
+    <Data Name="UtcTime">2025-01-15 10:30:00.123</Data>
+    <Data Name="ProcessGuid">{12345678-1234-1234-1234-123456789012}</Data>
+    <Data Name="ProcessId">0x1a2b</Data>
+    <Data Name="Image">C:\Windows\System32\certutil.exe</Data>
+    <Data Name="FileVersion">10.0.19041.1</Data>
+    <Data Name="Description">Certificate Services Command Line Tool</Data>
+    <Data Name="Product">Microsoft Windows Operating System</Data>
+    <Data Name="Company">Microsoft Corporation</Data>
+    <Data Name="OriginalFileName">CertUtil.exe</Data>
+    <Data Name="CommandLine">certutil.exe -verify C:\Certificates\company-cert.cer</Data>
+    <Data Name="CurrentDirectory">C:\Certificates\</Data>
+    <Data Name="User">NT AUTHORITY\SYSTEM</Data>
+    <Data Name="LogonGuid">{12345678-1234-1234-1234-123456789012}</Data>
+    <Data Name="LogonId">0x3e7</Data>
+    <Data Name="TerminalSessionId">0</Data>
+    <Data Name="IntegrityLevel">System</Data>
+    <Data Name="Hashes">SHA256=ABC123DEF456</Data>
+    <Data Name="ParentProcessGuid">{12345678-1234-1234-1234-123456789011}</Data>
+    <Data Name="ParentProcessId">0x9c4</Data>
+    <Data Name="ParentImage">C:\Windows\System32\msiexec.exe</Data>
+    <Data Name="ParentCommandLine">C:\Windows\System32\msiexec.exe /i software.msi</Data>
+  </EventData>
+</Event>
