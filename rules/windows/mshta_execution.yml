@@ -1,0 +1,48 @@
+name: "MSHTA Suspicious Script Execution"
+id: "WIN-006"
+platform: windows
+severity: medium
+mitre_attack:
+  - T1218.005  # Mshta
+  - T1059      # Command and Scripting Interpreter
+
+description: |
+  Detects execution of mshta.exe with suspicious parameters indicating potential
+  malicious script execution. MSHTA is a legitimate Windows utility for executing
+  HTML Application (.hta) files, but attackers abuse it to execute VBScript or
+  JavaScript from remote URLs or local files to bypass security controls. This
+  technique is commonly used for initial access and defense evasion.
+
+detection:
+  process_name: "mshta.exe"
+  command_contains_any:
+    - "http"
+    - "https"
+    - "vbscript"
+    - "javascript"
+    - ".hta"
+    - "about:"
+
+false_positives:
+  - "Legitimate HTA applications used by IT departments"
+  - "Corporate intranet applications using HTA"
+  - "Software installers using mshta for UI"
+
+whitelist:
+  parent_processes:
+    - "explorer.exe"
+    - "setup.exe"
+  users:
+    - "SYSTEM"
+  paths:
+    - "C:\\Program Files"
+    - "C:\\Windows\\Installer"
+
+response:
+  - "Capture full command line including URL or script source"
+  - "Block outbound connection if URL is present"
+  - "Review parent process and user context"
+  - "Check browser download history for .hta files"
+  - "Analyze .hta file content if local execution"
+  - "Search for similar mshta executions across environment"
+  - "Review email attachments if part of phishing campaign"

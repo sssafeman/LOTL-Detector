@@ -1,0 +1,46 @@
+name: "WMI Lateral Movement"
+id: "WIN-003"
+platform: windows
+severity: high
+mitre_attack:
+  - T1047   # Windows Management Instrumentation
+  - T1021   # Remote Services
+
+description: |
+  Detects WMI (Windows Management Instrumentation) being used for remote command
+  execution and lateral movement. WMIC process call create and /node: are common
+  patterns used by attackers including Lazarus Group to execute commands on remote
+  systems. WMI provides powerful remote administration capabilities frequently
+  abused for post-exploitation activities.
+
+detection:
+  process_name: "wmic.exe"
+  command_contains_any:
+    - "process call create"
+    - "/node:"
+    - "node:"
+    - "PROCESS CALL CREATE"
+
+false_positives:
+  - "System administrators performing remote management"
+  - "Automated deployment and configuration tools"
+  - "Enterprise management software"
+
+whitelist:
+  parent_processes:
+    - "sccm.exe"
+    - "manageengine.exe"
+    - "ansible.exe"
+  users:
+    - "svc_deployment"
+    - "svc_monitoring"
+  paths:
+    - "C:\\Program Files\\Microsoft System Center"
+
+response:
+  - "Identify target systems from command line"
+  - "Review authentication logs on both source and target"
+  - "Check what command was executed remotely"
+  - "Investigate for signs of privilege escalation"
+  - "Examine network traffic for additional C2 activity"
+  - "Assess scope of lateral movement across environment"

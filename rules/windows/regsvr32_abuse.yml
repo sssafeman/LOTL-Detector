@@ -1,0 +1,47 @@
+name: "Regsvr32 Application Whitelisting Bypass"
+id: "WIN-004"
+platform: windows
+severity: high
+mitre_attack:
+  - T1218.010  # Regsvr32
+  - T1218      # System Binary Proxy Execution
+
+description: |
+  Detects abuse of regsvr32.exe to bypass application whitelisting and execute
+  malicious scripts. The "Squiblydoo" technique uses regsvr32 with scrobj.dll
+  to download and execute remote scripts (SCT files). This method allows execution
+  of arbitrary code while appearing to be a legitimate Windows process, commonly
+  used by APT groups including Lazarus for defense evasion.
+
+detection:
+  process_name: "regsvr32.exe"
+  command_contains_any:
+    - "/s /i:http"
+    - "/i:http"
+    - "scrobj.dll"
+    - "/s /u /i:http"
+    - ".sct"
+
+false_positives:
+  - "Legitimate COM object registration by installers"
+  - "Software updates registering DLLs"
+
+whitelist:
+  parent_processes:
+    - "msiexec.exe"
+    - "setup.exe"
+    - "installer.exe"
+  users:
+    - "SYSTEM"
+  paths:
+    - "C:\\Program Files"
+    - "C:\\Program Files (x86)"
+
+response:
+  - "Block network connection immediately"
+  - "Capture command line and URL if present"
+  - "Analyze parent process and process tree"
+  - "Check for downloaded .sct files in temp directories"
+  - "Review Windows Registry for malicious COM registrations"
+  - "Scan memory for injected code or shellcode"
+  - "Isolate endpoint if active C2 communication detected"

@@ -1,0 +1,44 @@
+name: "PowerShell Encoded Command Execution"
+id: "WIN-002"
+platform: windows
+severity: high
+mitre_attack:
+  - T1059.001  # PowerShell
+  - T1027      # Obfuscated Files or Information
+
+description: |
+  Detects PowerShell execution with encoded commands using -encodedcommand or -enc flags.
+  Attackers commonly use Base64-encoded PowerShell commands to evade detection and
+  obfuscate malicious payloads. This technique is frequently used by Lazarus Group,
+  APT29, and other sophisticated threat actors for initial access and execution.
+
+detection:
+  process_name: "powershell.exe"
+  command_contains_any:
+    - "-encodedcommand"
+    - "-enc"
+    - "-EncodedCommand"
+    - "-e "
+
+false_positives:
+  - "Legitimate system administration scripts"
+  - "Software deployment tools"
+  - "Monitoring and management solutions"
+
+whitelist:
+  parent_processes:
+    - "sccm.exe"
+    - "psexec.exe"
+    - "solarwinds.exe"
+  users:
+    - "SYSTEM"
+  paths:
+    - "C:\\Program Files\\Microsoft Monitoring Agent"
+    - "C:\\Program Files\\SCCM"
+
+response:
+  - "Decode the Base64 command and analyze payload"
+  - "Review process tree and parent process"
+  - "Check for network connections initiated by PowerShell"
+  - "Investigate user account and authentication logs"
+  - "Search for similar encoded commands across environment"

@@ -1,0 +1,45 @@
+name: "BITSAdmin Download Abuse"
+id: "WIN-005"
+platform: windows
+severity: high
+mitre_attack:
+  - T1197   # BITS Jobs
+  - T1105   # Ingress Tool Transfer
+
+description: |
+  Detects abuse of BITSAdmin (Background Intelligent Transfer Service) to download
+  files from the internet. BITS is a legitimate Windows service for asynchronous
+  file transfers, but attackers including Lazarus Group use bitsadmin.exe to download
+  malicious payloads while evading detection. BITS jobs can persist across reboots
+  and operate stealthily in the background.
+
+detection:
+  process_name: "bitsadmin.exe"
+  command_contains_all:
+    - "/transfer"
+    - "http"
+
+false_positives:
+  - "Windows Update components"
+  - "Microsoft software update services"
+  - "Legitimate software downloads by admin tools"
+
+whitelist:
+  parent_processes:
+    - "services.exe"
+    - "svchost.exe"
+    - "wsus.exe"
+  users:
+    - "SYSTEM"
+    - "NETWORK SERVICE"
+  paths:
+    - "C:\\Windows\\System32\\Tasks"
+
+response:
+  - "Extract download URL and destination path from command"
+  - "Check BITS job queue for persistence: bitsadmin /list /verbose"
+  - "Analyze downloaded file hash against threat intelligence"
+  - "Review user account activity and privileges"
+  - "Check for scheduled tasks using BITS"
+  - "Examine parent process legitimacy"
+  - "Quarantine downloaded files if suspicious"
