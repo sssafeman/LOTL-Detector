@@ -35,7 +35,7 @@ class WindowsCollector(BaseCollector):
         Collect events from Windows event log files
 
         Args:
-            source: Path to .evtx file or directory containing .evtx files
+            source: Path to .evtx/.xml file or directory containing .evtx/.xml files
             start_time: Optional filter - only return events after this time
             end_time: Optional filter - only return events before this time
 
@@ -54,19 +54,37 @@ class WindowsCollector(BaseCollector):
         events = []
 
         if source_path.is_file():
-            # Single file
-            events.extend(self._parse_evtx_file(source_path))
+            # Single file - determine type by extension
+            if source_path.suffix.lower() == '.evtx':
+                events.extend(self._parse_evtx_file(source_path))
+            elif source_path.suffix.lower() == '.xml':
+                events.extend(self._parse_xml_file(source_path))
+            else:
+                logger.warning(f"Unknown file type: {source_path.suffix}")
         elif source_path.is_dir():
-            # Directory - find all .evtx files
+            # Directory - find all .evtx and .xml files
             evtx_files = list(source_path.glob('*.evtx'))
-            if not evtx_files:
-                logger.warning(f"No .evtx files found in directory: {source_path}")
+            xml_files = list(source_path.glob('*.xml'))
 
+            all_files = evtx_files + xml_files
+
+            if not all_files:
+                logger.warning(f"No .evtx or .xml files found in directory: {source_path}")
+
+            # Parse .evtx files
             for evtx_file in evtx_files:
                 try:
                     events.extend(self._parse_evtx_file(evtx_file))
                 except Exception as e:
                     logger.error(f"Failed to parse {evtx_file}: {e}")
+                    # Continue with other files
+
+            # Parse .xml files
+            for xml_file in xml_files:
+                try:
+                    events.extend(self._parse_xml_file(xml_file))
+                except Exception as e:
+                    logger.error(f"Failed to parse {xml_file}: {e}")
                     # Continue with other files
 
         # Apply time filtering
@@ -112,6 +130,41 @@ class WindowsCollector(BaseCollector):
 
         except Exception as e:
             logger.error(f"Failed to open/read .evtx file {file_path}: {e}")
+            raise
+
+        logger.debug(f"Parsed {len(events)} events from {file_path}")
+        return events
+
+    def _parse_xml_file(self, file_path: Path) -> List[Event]:
+        """
+        Parse a single .xml file containing raw Sysmon XML
+
+        Args:
+            file_path: Path to .xml file containing Sysmon event XML
+
+        Returns:
+            List of Event objects
+        """
+        events = []
+
+        try:
+            # Read the raw XML content
+            with open(file_path, 'r', encoding='utf-8') as f:
+                xml_content = f.read()
+
+            # Try to parse as a single event
+            try:
+                event = self.parse_event(xml_content)
+                if event:
+                    events.append(event)
+            except ValueError as e:
+                # Skip events we can't parse (e.g., non-Event ID 1)
+                logger.debug(f"Skipping event in {file_path}: {e}")
+            except Exception as e:
+                logger.error(f"Error parsing XML file {file_path}: {e}")
+
+        except Exception as e:
+            logger.error(f"Failed to read XML file {file_path}: {e}")
             raise
 
         logger.debug(f"Parsed {len(events)} events from {file_path}")
