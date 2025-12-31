@@ -1,0 +1,42 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>1</EventID>
+    <Version>5</Version>
+    <Level>4</Level>
+    <Task>1</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2025-01-16T10:22:15.123456Z" />
+    <EventRecordID>65432</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="3456" ThreadID="7890" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>WORKSTATION-03</Computer>
+    <Security UserID="S-1-5-21-987654321-987654321-987654321-1002" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">-</Data>
+    <Data Name="UtcTime">2025-01-16 10:22:15.123</Data>
+    <Data Name="ProcessGuid">{12345678-1234-5678-9abc-def012345678}</Data>
+    <Data Name="ProcessId">0x7d0</Data>
+    <Data Name="Image">C:\Windows\System32\wbem\wmic.exe</Data>
+    <Data Name="FileVersion">10.0.19041.1</Data>
+    <Data Name="Description">WMI Commandline Utility</Data>
+    <Data Name="Product">Microsoft Windows Operating System</Data>
+    <Data Name="Company">Microsoft Corporation</Data>
+    <Data Name="OriginalFileName">wmic.exe</Data>
+    <Data Name="CommandLine">wmic /node:TARGET-SERVER process call create "cmd.exe /c powershell.exe -enc JABjAGwAaQBlAG4AdA..."</Data>
+    <Data Name="CurrentDirectory">C:\Windows\System32\</Data>
+    <Data Name="User">WORKSTATION-03\admin_user</Data>
+    <Data Name="LogonGuid">{12345678-1234-5678-9abc-def012345679}</Data>
+    <Data Name="LogonId">0x23456</Data>
+    <Data Name="TerminalSessionId">2</Data>
+    <Data Name="IntegrityLevel">High</Data>
+    <Data Name="Hashes">SHA256=ABC123DEF456</Data>
+    <Data Name="ParentProcessGuid">{12345678-1234-5678-9abc-def012345677}</Data>
+    <Data Name="ParentProcessId">0x5dc</Data>
+    <Data Name="ParentImage">C:\Windows\System32\cmd.exe</Data>
+    <Data Name="ParentCommandLine">cmd.exe</Data>
+  </EventData>
+</Event>
