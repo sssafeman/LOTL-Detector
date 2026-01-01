@@ -581,26 +581,6 @@ print(f"Generated {result['alerts_generated']} alerts")
 - macOS unified log support
 - Advanced behavioral correlation
 
-## Team Contributions
-
-This project was developed as a collaborative team effort. See [CONTRIBUTIONS.md](CONTRIBUTIONS.md) for detailed information about:
-
-- Individual team member contributions
-- Division of responsibilities
-- Integration process and workflow
-- Testing strategy
-- Git workflow and collaboration approach
-
-**Team Members:**
-- **Said** - Core Engine & Project Lead (40%)
-- **Ali** - Windows Collector Specialist (20%)
-- **Shahmir** - Linux Collector Specialist (25%)
-- **Tamerlan** - API & Dashboard Specialist (15%)
-
-## Contributing
-
-For external contributors, please follow the guidelines in `CONTRIBUTIONS.md`.
-
 ## License
 
 MIT License - See `LICENSE` file
