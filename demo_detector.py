@@ -25,6 +25,7 @@ from core.rule_loader import RuleLoader
 from core.engine import DetectionEngine, Alert
 from core.database import AlertDatabase
 from core.scorer import Scorer
+from core.config import get_database_path, get_rules_directory
 from collectors.windows.collector import WindowsCollector
 from collectors.linux.collector import LinuxCollector
 from collectors.base import Event
@@ -521,6 +522,15 @@ def run_scan_mode(platform: str, log_path: str, rules_dir: str,
 
 def main():
     """Main entry point"""
+    # Load configuration defaults
+    try:
+        db_path = get_database_path()
+        rules_dir = get_rules_directory()
+    except Exception:
+        # Fallback to hardcoded defaults if config fails
+        db_path = 'lotl_detector.db'
+        rules_dir = 'rules'
+
     parser = argparse.ArgumentParser(
         description='LOTL Detector - Demonstration Tool for Living Off The Land Detection',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -576,14 +586,14 @@ Examples:
     parser.add_argument(
         '--rules-dir',
         type=str,
-        default='rules',
-        help='Rules directory (default: rules/)'
+        default=rules_dir,
+        help=f'Rules directory (default: {rules_dir})'
     )
     parser.add_argument(
         '--database',
         type=str,
-        default='lotl_detector.db',
-        help='Database file (default: lotl_detector.db)'
+        default=db_path,
+        help=f'Database file (default: {db_path})'
     )
 
     # Output options

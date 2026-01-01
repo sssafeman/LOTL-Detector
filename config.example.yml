@@ -1,0 +1,46 @@
+# LOTL Detector Configuration Example
+#
+# Copy this file to config.yml and customize as needed:
+#   cp config.example.yml config.yml
+#
+# All settings are optional - if omitted, defaults will be used.
+
+# Database configuration
+database:
+  # Path to SQLite database file for storing alerts
+  # Default: alerts.db
+  path: alerts.db
+
+# Detection rules configuration
+rules:
+  # Directory containing YAML detection rules
+  # Default: rules/
+  directory: rules/
+
+# Logging configuration
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  # Default: INFO
+  level: INFO
+
+  # Log file path
+  # Default: detector.log
+  file: detector.log
+
+# REST API server configuration
+api:
+  # Host to bind API server to
+  # 0.0.0.0 - Listen on all interfaces
+  # 127.0.0.1 - Listen only on localhost
+  # Default: 0.0.0.0
+  host: 0.0.0.0
+
+  # Port for API server
+  # Must be between 1 and 65535
+  # Default: 5000
+  port: 5000
+
+  # Enable Flask debug mode
+  # WARNING: Never enable in production!
+  # Default: false
+  debug: false

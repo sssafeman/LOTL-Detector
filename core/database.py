@@ -4,7 +4,7 @@ Database module for persistent alert storage
 import sqlite3
 import json
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 from core.engine import Alert
 import logging
@@ -32,13 +32,22 @@ class AlertDatabase:
     SQLite database for storing and querying detection alerts
     """
 
-    def __init__(self, db_path: str = "alerts.db"):
+    def __init__(self, db_path: Optional[str] = None):
         """
         Initialize database connection and create schema if needed
 
         Args:
-            db_path: Path to SQLite database file
+            db_path: Path to SQLite database file (default: from config)
         """
+        # Use config if db_path not provided
+        if db_path is None:
+            try:
+                from core.config import get_database_path
+                db_path = get_database_path()
+            except Exception:
+                # Fallback to default if config fails
+                db_path = "alerts.db"
+
         self.db_path = Path(db_path)
         self.connection = None
         self._connect()

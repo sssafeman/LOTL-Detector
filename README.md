@@ -240,6 +240,81 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
+## Configuration
+
+LOTL Detector uses a YAML-based configuration system for easy deployment and customization.
+
+### Creating Configuration File
+
+Copy the example configuration and customize as needed:
+
+```bash
+cp config.example.yml config.yml
+```
+
+### Configuration Options
+
+All configuration options are optional. If not specified, sensible defaults will be used.
+
+```yaml
+# Database configuration
+database:
+  path: alerts.db              # Path to SQLite database file
+
+# Detection rules configuration
+rules:
+  directory: rules/            # Directory containing YAML detection rules
+
+# Logging configuration
+logging:
+  level: INFO                  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: detector.log           # Log file path
+
+# REST API server configuration
+api:
+  host: 0.0.0.0               # Host to bind API server to
+  port: 5000                  # Port for API server (1-65535)
+  debug: false                # Enable Flask debug mode (NEVER in production!)
+```
+
+### Configuration Loading
+
+The framework loads configuration in this order:
+
+1. **config.yml** - If present, values override defaults
+2. **Defaults** - Built-in defaults used for any unspecified values
+3. **Command-line** - CLI arguments override config file values
+
+Example with custom database location:
+
+```yaml
+database:
+  path: /var/lib/lotl/alerts.db
+```
+
+### Environment-Specific Configuration
+
+Use different config files for different environments:
+
+```bash
+# Development
+cp config.example.yml config.yml
+
+# Production
+cp config.example.yml config.production.yml
+# Edit config.production.yml with production settings
+```
+
+### Configuration Validation
+
+The framework validates configuration on startup:
+- API port must be between 1-65535
+- Logging level must be valid (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- Rules directory must exist (if not default)
+- All boolean values must be true/false
+
+Invalid configuration will prevent startup with a clear error message.
+
 ### Creating a Detection Rule
 
 Rules are defined in YAML format. See `rules/schema.json` for the full specification.

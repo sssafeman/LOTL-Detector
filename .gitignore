@@ -210,3 +210,5 @@ __marimo__/
 
 # LOTL Detector runtime files
 *.db
+config.yml
+detector.log

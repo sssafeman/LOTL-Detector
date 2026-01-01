@@ -9,6 +9,7 @@ from flask_cors import CORS
 from core.database import AlertDatabase
 from core.rule_loader import RuleLoader
 from core.engine import DetectionEngine
+from core.config import get_config, get_database_path, get_rules_directory, get_logging_config
 from collectors.windows.collector import WindowsCollector
 from collectors.linux.collector import LinuxCollector
 import logging
@@ -35,12 +36,23 @@ def create_app(config=None):
     app = Flask(__name__)
     CORS(app)  # Enable CORS for all routes
 
-    # Default configuration
-    app.config['DATABASE_PATH'] = os.getenv('LOTL_DB_PATH', 'alerts.db')
-    app.config['RULES_DIR'] = os.getenv('LOTL_RULES_DIR', 'rules')
-    app.config['LOG_LEVEL'] = os.getenv('LOTL_LOG_LEVEL', 'INFO')
+    # Load configuration from config system
+    try:
+        app_config = get_config()
+        logging_config = get_logging_config()
 
-    # Override with provided config
+        # Set configuration from config system
+        app.config['DATABASE_PATH'] = get_database_path()
+        app.config['RULES_DIR'] = get_rules_directory()
+        app.config['LOG_LEVEL'] = logging_config['level']
+    except Exception as e:
+        logger.warning(f"Failed to load config, using defaults: {e}")
+        # Fallback to defaults
+        app.config['DATABASE_PATH'] = 'alerts.db'
+        app.config['RULES_DIR'] = 'rules'
+        app.config['LOG_LEVEL'] = 'INFO'
+
+    # Override with provided config (for testing)
     if config:
         app.config.update(config)
 
