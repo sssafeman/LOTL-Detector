@@ -212,3 +212,6 @@ __marimo__/
 *.db
 config.yml
 detector.log
+
+# Claude Code temporary files
+.claude/
