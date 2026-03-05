@@ -1,4 +1,4 @@
-# LOTL Detector
+ # LOTL Detector
 
 Cross-platform Living Off The Land (LOTL) detection framework for cybersecurity analysis.
 
@@ -75,12 +75,12 @@ LOTL Detector identifies suspicious use of legitimate system utilities commonly 
 │                                  │                                             │
 │                     ┌────────────┴────────────┐                                │
 │                     │                         │                                │
-│          ┌──────────▼──────────┐   ┌─────────▼──────────┐                      │
+│          ┌──────────▼──────────┐   ┌──────────▼─────────┐                      │
 │          │  WindowsCollector   │   │  LinuxCollector    │                      │
 │          │  - Sysmon parser    │   │  - auditd parser   │                      │
 │          │  - Event ID 1       │   │  - EXECVE logs     │                      │
 │          │  - Process tracking │   │  - Process tracking│                      │
-│          └──────────▲──────────┘   └─────────▲──────────┘                      │
+│          └──────────▲──────────┘   └──────────▲─────────┘                      │
 │                     │                         │                                │
 └─────────────────────┼─────────────────────────┼────────────────────────────────┘
                       │                         │
