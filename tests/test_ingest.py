@@ -148,6 +148,25 @@ class TestReadNewText:
         assert second["text"] == "c\n"
         assert second["reset"] is False
 
+    def test_multibyte_utf8_offset_is_exact(self, logfile):
+        # A command line with multibyte UTF-8 must not corrupt offset math.
+        # Byte offset of the first line must equal its encoded length.
+        line1 = 'comm="café" arg="naïve"\n'
+        line2 = 'comm="second"\n'
+        with open(logfile, "w", encoding="utf-8") as f:
+            f.write(line1 + line2)
+        first = read_new_text(logfile, Checkpoint(source=logfile))
+        assert first["text"] == line1 + line2
+        assert first["new_offset"] == len((line1 + line2).encode("utf-8"))
+
+        # Resume after only the first line's byte length yields line2 exactly.
+        cp = Checkpoint(
+            source=logfile, offset=len(line1.encode("utf-8")),
+            inode=first["inode"], size=first["size"],
+        )
+        second = read_new_text(logfile, cp)
+        assert second["text"] == line2
+
     def test_truncation_resets(self, logfile):
         with open(logfile, "w") as f:
             f.write("aaaa\nbbbb\n")

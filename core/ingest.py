@@ -94,26 +94,31 @@ def read_new_text(path: str, checkpoint: Checkpoint) -> Dict[str, Any]:
     if reset and checkpoint.offset:
         logger.info(f"Source rotated or truncated, restarting: {path}")
 
-    with open(path, "r", errors="replace") as f:
+    # Read in binary and seek by byte offset. Text-mode seek to an
+    # arbitrary byte offset is unsupported in Python and can misalign on
+    # multibyte UTF-8; byte offsets are unambiguous. Complete lines are
+    # split on the raw bytes, then decoded, so offsets are always exact.
+    with open(path, "rb") as f:
         f.seek(start)
         raw = f.read()
 
     # Hold back a trailing partial line (no terminating newline).
-    if raw and not raw.endswith("\n"):
-        last_nl = raw.rfind("\n")
+    if raw and not raw.endswith(b"\n"):
+        last_nl = raw.rfind(b"\n")
         if last_nl == -1:
             # No complete line available yet.
             return {
                 "text": "", "start": start, "new_offset": start,
                 "inode": inode, "size": size, "reset": reset,
             }
-        complete = raw[: last_nl + 1]
+        complete_bytes = raw[: last_nl + 1]
     else:
-        complete = raw
+        complete_bytes = raw
 
-    new_offset = start + len(complete.encode("utf-8"))
+    new_offset = start + len(complete_bytes)
     return {
-        "text": complete, "start": start, "new_offset": new_offset,
+        "text": complete_bytes.decode("utf-8", errors="replace"),
+        "start": start, "new_offset": new_offset,
         "inode": inode, "size": size, "reset": reset,
     }
 
@@ -310,8 +315,14 @@ class IngestionService:
         events, consumed = normalize_parse_result(self.parser(text), text)
         # The offset advances only past the consumed prefix, so a trailing
         # partial record (a multi-line XML element still being written) is
-        # re-read on the next run instead of being split or dropped.
-        consumed_offset = read["start"] + len(text[:consumed].encode("utf-8"))
+        # re-read on the next run instead of being split or dropped. When
+        # the whole buffer was consumed, use the reader's exact byte offset
+        # rather than re-encoding, which would drift on replaced invalid
+        # UTF-8 bytes.
+        if consumed >= len(text):
+            consumed_offset = read["new_offset"]
+        else:
+            consumed_offset = read["start"] + len(text[:consumed].encode("utf-8"))
         summary["events_processed"] = len(events)
 
         for batch in chunked(events, self.batch_size):
