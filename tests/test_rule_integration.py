@@ -357,6 +357,247 @@ class TestLinuxRuleIntegration:
         assert "T1071" in nc_alert.mitre_attack, "Should include T1071 MITRE technique"
 
 
+class TestWindowsNewRuleIntegration:
+    """Integration tests for the WIN-007 to WIN-011 detection rules"""
+
+    @pytest.fixture
+    def windows_collector(self):
+        """Create a Windows collector instance"""
+        return WindowsCollector()
+
+    @pytest.fixture
+    def detection_engine(self):
+        """Create a detection engine with all rules loaded"""
+        rules = RuleLoader().load_rules_directory("rules")
+        return DetectionEngine(rules)
+
+    def _alert_for(self, collector, engine, fixture_name, rule_id):
+        """Parse a fixture and return the alert for the given rule id, if any."""
+        fixture_path = WINDOWS_FIXTURES / fixture_name
+        events = collector.collect_events(str(fixture_path))
+        assert len(events) == 1, f"{fixture_name} should parse exactly one event"
+        assert events[0].platform == "windows", f"{fixture_name} should be Windows"
+        alerts = engine.match_event(events[0])
+        return next((a for a in alerts if a.rule_id == rule_id), None)
+
+    def test_win007_powershell_cradle_triggers(self, windows_collector, detection_engine):
+        """WIN-007: PowerShell WebClient download cradle should trigger"""
+        alert = self._alert_for(
+            windows_collector, detection_engine,
+            "malicious_win007_powershell_cradle.xml", "WIN-007",
+        )
+        assert alert is not None, "Should trigger WIN-007 rule"
+        assert alert.severity == "high", "Should have HIGH severity"
+        assert 60 <= alert.score <= 120, f"Score {alert.score} out of expected range"
+        assert "T1059.001" in alert.mitre_attack
+        assert "T1105" in alert.mitre_attack
+
+    def test_win007_no_alert_on_benign(self, windows_collector, detection_engine):
+        """WIN-007: Benign PowerShell should NOT trigger"""
+        alert = self._alert_for(
+            windows_collector, detection_engine,
+            "benign_win007_powershell.xml", "WIN-007",
+        )
+        assert alert is None, "Benign PowerShell should NOT trigger WIN-007"
+
+    def test_win008_rundll32_js_triggers(self, windows_collector, detection_engine):
+        """WIN-008: Rundll32 JavaScript proxy execution should trigger"""
+        alert = self._alert_for(
+            windows_collector, detection_engine,
+            "malicious_win008_rundll32_js.xml", "WIN-008",
+        )
+        assert alert is not None, "Should trigger WIN-008 rule"
+        assert alert.severity == "high", "Should have HIGH severity"
+        assert 60 <= alert.score <= 120, f"Score {alert.score} out of expected range"
+        assert "T1218.011" in alert.mitre_attack
+
+    def test_win008_no_alert_on_benign(self, windows_collector, detection_engine):
+        """WIN-008: Benign rundll32 should NOT trigger"""
+        alert = self._alert_for(
+            windows_collector, detection_engine,
+            "benign_win008_rundll32.xml", "WIN-008",
+        )
+        assert alert is None, "Benign rundll32 should NOT trigger WIN-008"
+
+    def test_win009_reg_sam_export_triggers(self, windows_collector, detection_engine):
+        """WIN-009: Registry hive export for credential access should trigger"""
+        alert = self._alert_for(
+            windows_collector, detection_engine,
+            "malicious_win009_reg_sam_export.xml", "WIN-009",
+        )
+        assert alert is not None, "Should trigger WIN-009 rule"
+        assert alert.severity == "critical", "Should have CRITICAL severity"
+        assert 90 <= alert.score <= 150, f"Score {alert.score} out of expected range"
+        assert "T1003.002" in alert.mitre_attack
+
+    def test_win009_no_alert_on_benign(self, windows_collector, detection_engine):
+        """WIN-009: Benign reg query should NOT trigger"""
+        alert = self._alert_for(
+            windows_collector, detection_engine,
+            "benign_win009_reg.xml", "WIN-009",
+        )
+        assert alert is None, "Benign reg query should NOT trigger WIN-009"
+
+    def test_win010_msiexec_remote_triggers(self, windows_collector, detection_engine):
+        """WIN-010: Msiexec remote package execution should trigger"""
+        alert = self._alert_for(
+            windows_collector, detection_engine,
+            "malicious_win010_msiexec_remote.xml", "WIN-010",
+        )
+        assert alert is not None, "Should trigger WIN-010 rule"
+        assert alert.severity == "high", "Should have HIGH severity"
+        assert 60 <= alert.score <= 120, f"Score {alert.score} out of expected range"
+        assert "T1218.007" in alert.mitre_attack
+        assert "T1105" in alert.mitre_attack
+
+    def test_win010_no_alert_on_benign(self, windows_collector, detection_engine):
+        """WIN-010: Benign local msiexec install should NOT trigger"""
+        alert = self._alert_for(
+            windows_collector, detection_engine,
+            "benign_win010_msiexec.xml", "WIN-010",
+        )
+        assert alert is None, "Benign local msiexec should NOT trigger WIN-010"
+
+    def test_win011_cmstp_inf_triggers(self, windows_collector, detection_engine):
+        """WIN-011: CMSTP suspicious INF execution should trigger"""
+        alert = self._alert_for(
+            windows_collector, detection_engine,
+            "malicious_win011_cmstp_inf.xml", "WIN-011",
+        )
+        assert alert is not None, "Should trigger WIN-011 rule"
+        assert alert.severity == "high", "Should have HIGH severity"
+        assert 60 <= alert.score <= 120, f"Score {alert.score} out of expected range"
+        assert "T1218.003" in alert.mitre_attack
+
+    def test_win011_no_alert_on_benign(self, windows_collector, detection_engine):
+        """WIN-011: Benign VPN profile INF should NOT trigger"""
+        alert = self._alert_for(
+            windows_collector, detection_engine,
+            "benign_win011_cmstp.xml", "WIN-011",
+        )
+        assert alert is None, "Benign cmstp install should NOT trigger WIN-011"
+
+
+class TestLinuxNewRuleIntegration:
+    """Integration tests for the LNX-007 to LNX-011 detection rules"""
+
+    @pytest.fixture
+    def linux_collector(self):
+        """Create a Linux collector instance"""
+        return LinuxCollector()
+
+    @pytest.fixture
+    def detection_engine(self):
+        """Create a detection engine with all rules loaded"""
+        rules = RuleLoader().load_rules_directory("rules")
+        return DetectionEngine(rules)
+
+    def _alert_for(self, collector, engine, fixture_name, rule_id):
+        """Parse a fixture and return the alert for the given rule id, if any."""
+        fixture_path = LINUX_FIXTURES / fixture_name
+        events = collector.collect_events(str(fixture_path))
+        assert len(events) == 1, f"{fixture_name} should parse exactly one event"
+        assert events[0].platform == "linux", f"{fixture_name} should be Linux"
+        alerts = engine.match_event(events[0])
+        return next((a for a in alerts if a.rule_id == rule_id), None)
+
+    def test_lnx007_python_reverse_shell_triggers(self, linux_collector, detection_engine):
+        """LNX-007: Python reverse shell one-liner should trigger"""
+        alert = self._alert_for(
+            linux_collector, detection_engine,
+            "malicious_lnx007_python_reverse_shell.log", "LNX-007",
+        )
+        assert alert is not None, "Should trigger LNX-007 rule"
+        assert alert.severity == "critical", "Should have CRITICAL severity"
+        assert 90 <= alert.score <= 150, f"Score {alert.score} out of expected range"
+        assert "T1059.006" in alert.mitre_attack
+
+    def test_lnx007_no_alert_on_benign(self, linux_collector, detection_engine):
+        """LNX-007: Benign python one-liner should NOT trigger"""
+        alert = self._alert_for(
+            linux_collector, detection_engine,
+            "benign_lnx007_python.log", "LNX-007",
+        )
+        assert alert is None, "Benign python should NOT trigger LNX-007"
+
+    def test_lnx008_systemd_persistence_triggers(self, linux_collector, detection_engine):
+        """LNX-008: Systemd service persistence should trigger"""
+        alert = self._alert_for(
+            linux_collector, detection_engine,
+            "malicious_lnx008_systemd_persistence.log", "LNX-008",
+        )
+        assert alert is not None, "Should trigger LNX-008 rule"
+        assert alert.severity == "high", "Should have HIGH severity"
+        assert 60 <= alert.score <= 120, f"Score {alert.score} out of expected range"
+        assert "T1543.002" in alert.mitre_attack
+
+    def test_lnx008_no_alert_on_benign(self, linux_collector, detection_engine):
+        """LNX-008: Benign systemctl restart should NOT trigger"""
+        alert = self._alert_for(
+            linux_collector, detection_engine,
+            "benign_lnx008_systemctl.log", "LNX-008",
+        )
+        assert alert is None, "Benign systemctl should NOT trigger LNX-008"
+
+    def test_lnx009_ld_preload_triggers(self, linux_collector, detection_engine):
+        """LNX-009: LD_PRELOAD from user-writable directory should trigger"""
+        alert = self._alert_for(
+            linux_collector, detection_engine,
+            "malicious_lnx009_ld_preload.log", "LNX-009",
+        )
+        assert alert is not None, "Should trigger LNX-009 rule"
+        assert alert.severity == "high", "Should have HIGH severity"
+        assert 60 <= alert.score <= 120, f"Score {alert.score} out of expected range"
+        assert "T1574.006" in alert.mitre_attack
+
+    def test_lnx009_no_alert_on_benign(self, linux_collector, detection_engine):
+        """LNX-009: Benign LD_PRELOAD from system path should NOT trigger"""
+        alert = self._alert_for(
+            linux_collector, detection_engine,
+            "benign_lnx009_ld_preload.log", "LNX-009",
+        )
+        assert alert is None, "Benign LD_PRELOAD should NOT trigger LNX-009"
+
+    def test_lnx010_authorized_keys_triggers(self, linux_collector, detection_engine):
+        """LNX-010: SSH authorized_keys modification should trigger"""
+        alert = self._alert_for(
+            linux_collector, detection_engine,
+            "malicious_lnx010_authorized_keys.log", "LNX-010",
+        )
+        assert alert is not None, "Should trigger LNX-010 rule"
+        assert alert.severity == "high", "Should have HIGH severity"
+        assert 60 <= alert.score <= 120, f"Score {alert.score} out of expected range"
+        assert "T1098.004" in alert.mitre_attack
+
+    def test_lnx010_no_alert_on_benign(self, linux_collector, detection_engine):
+        """LNX-010: Benign chmod on authorized_keys should NOT trigger"""
+        alert = self._alert_for(
+            linux_collector, detection_engine,
+            "benign_lnx010_authorized_keys.log", "LNX-010",
+        )
+        assert alert is None, "Benign chmod should NOT trigger LNX-010"
+
+    def test_lnx011_wget_execute_triggers(self, linux_collector, detection_engine):
+        """LNX-011: Wget download and immediate execution should trigger"""
+        alert = self._alert_for(
+            linux_collector, detection_engine,
+            "malicious_lnx011_wget_execute.log", "LNX-011",
+        )
+        assert alert is not None, "Should trigger LNX-011 rule"
+        assert alert.severity == "high", "Should have HIGH severity"
+        assert 60 <= alert.score <= 120, f"Score {alert.score} out of expected range"
+        assert "T1105" in alert.mitre_attack
+        assert "T1059.004" in alert.mitre_attack
+
+    def test_lnx011_no_alert_on_benign(self, linux_collector, detection_engine):
+        """LNX-011: Benign wget file download should NOT trigger"""
+        alert = self._alert_for(
+            linux_collector, detection_engine,
+            "benign_lnx011_wget.log", "LNX-011",
+        )
+        assert alert is None, "Benign wget should NOT trigger LNX-011"
+
+
 class TestRuleLoadingIntegration:
     """Integration tests for rule loading and detection engine initialization"""
 
@@ -414,7 +655,17 @@ class TestRuleLoadingIntegration:
             "wmi_lateral_movement.xml",
             "regsvr32_abuse.xml",
             "bitsadmin_download.xml",
-            "mshta_execution.xml"
+            "mshta_execution.xml",
+            "malicious_win007_powershell_cradle.xml",
+            "benign_win007_powershell.xml",
+            "malicious_win008_rundll32_js.xml",
+            "benign_win008_rundll32.xml",
+            "malicious_win009_reg_sam_export.xml",
+            "benign_win009_reg.xml",
+            "malicious_win010_msiexec_remote.xml",
+            "benign_win010_msiexec.xml",
+            "malicious_win011_cmstp_inf.xml",
+            "benign_win011_cmstp.xml"
         ]
 
         for fixture in fixtures:
@@ -434,7 +685,17 @@ class TestRuleLoadingIntegration:
             "cron_persistence.log",
             "ssh_suspicious.log",
             "base64_decode.log",
-            "netcat_listener.log"
+            "netcat_listener.log",
+            "malicious_lnx007_python_reverse_shell.log",
+            "benign_lnx007_python.log",
+            "malicious_lnx008_systemd_persistence.log",
+            "benign_lnx008_systemctl.log",
+            "malicious_lnx009_ld_preload.log",
+            "benign_lnx009_ld_preload.log",
+            "malicious_lnx010_authorized_keys.log",
+            "benign_lnx010_authorized_keys.log",
+            "malicious_lnx011_wget_execute.log",
+            "benign_lnx011_wget.log"
         ]
 
         for fixture in fixtures:

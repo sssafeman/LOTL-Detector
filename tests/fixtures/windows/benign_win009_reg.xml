@@ -1,0 +1,42 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>1</EventID>
+    <Version>5</Version>
+    <Level>4</Level>
+    <Task>1</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2025-01-15T11:16:00.778899Z" />
+    <EventRecordID>22109</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="1234" ThreadID="5678" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>WORKSTATION01</Computer>
+    <Security UserID="S-1-5-21-1001" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">-</Data>
+    <Data Name="UtcTime">2025-01-15 11:16:00.778</Data>
+    <Data Name="ProcessGuid">{12345678-1234-1234-1234-1234567890b9}</Data>
+    <Data Name="ProcessId">0x2b09</Data>
+    <Data Name="Image">C:\Windows\System32\reg.exe</Data>
+    <Data Name="FileVersion">10.0.19041.1</Data>
+    <Data Name="Description">Registry Console Tool</Data>
+    <Data Name="Product">Microsoft Windows Operating System</Data>
+    <Data Name="Company">Microsoft Corporation</Data>
+    <Data Name="OriginalFileName">reg.exe</Data>
+    <Data Name="CommandLine">reg.exe query HKLM\Software\Microsoft\Windows\CurrentVersion /v ProgramFilesDir</Data>
+    <Data Name="CurrentDirectory">C:\Users\admin\</Data>
+    <Data Name="User">WORKSTATION01\admin</Data>
+    <Data Name="LogonGuid">{12345678-1234-1234-1234-1234567890b9}</Data>
+    <Data Name="LogonId">0x1f4b2</Data>
+    <Data Name="TerminalSessionId">1</Data>
+    <Data Name="IntegrityLevel">Medium</Data>
+    <Data Name="Hashes">SHA256=BB09BB09BB09</Data>
+    <Data Name="ParentProcessGuid">{12345678-1234-1234-1234-1234567890b6}</Data>
+    <Data Name="ParentProcessId">0x1abd</Data>
+    <Data Name="ParentImage">C:\Windows\System32\cmd.exe</Data>
+    <Data Name="ParentCommandLine">cmd.exe /c reg query</Data>
+  </EventData>
+</Event>

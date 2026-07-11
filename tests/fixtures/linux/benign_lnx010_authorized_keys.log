@@ -1,0 +1,5 @@
+type=SYSCALL msg=audit(1642283100.888:5311): arch=c000003e syscall=59 success=yes exit=0 a0=7ffddd332211 a1=7ffddd332230 a2=7ffddd332240 a3=0 items=2 ppid=6311 pid=63011 auid=1500 uid=1500 gid=1500 euid=1500 suid=1500 fsuid=1500 egid=1500 sgid=1500 fsgid=1500 tty=pts9 ses=21 comm="chmod" exe="/usr/bin/chmod" key=(null)
+type=EXECVE msg=audit(1642283100.888:5311): argc=3 a0="chmod" a1="600" a2="/home/developer/.ssh/authorized_keys"
+type=CWD msg=audit(1642283100.888:5311): cwd="/home/developer"
+type=PATH msg=audit(1642283100.888:5311): item=0 name="/usr/bin/chmod" inode=348000 dev=08:01 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+type=PROCTITLE msg=audit(1642283100.888:5311): proctitle=63686D6F6400363030

