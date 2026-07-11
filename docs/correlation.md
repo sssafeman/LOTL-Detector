@@ -168,6 +168,7 @@ inferred (phantom) parent.
 | CHAIN-WIN-002 | Script host to LOLBin downloader | high |
 | CHAIN-LNX-001 | Web server to shell to payload retrieval | critical |
 | CHAIN-LNX-002 | Cron to shell to remote download | high |
+| CHAIN-MAC-001 | Osascript to shell to network download | critical |
 
 ## Limitations
 

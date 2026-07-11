@@ -1,0 +1,46 @@
+name: "Osascript Shell Chain to Network Download"
+id: "CHAIN-MAC-001"
+platform: macos
+severity: critical
+mitre_attack:
+  - T1059.002
+  - T1059.004
+  - T1105
+description: |
+  Detects osascript running "do shell script", which spawns a shell that
+  in turn retrieves a remote payload. On macOS, AppleScript's do shell
+  script primitive launches /bin/sh, so an osascript to shell to curl
+  lineage inside a short window is the classic AppleScript-driven dropper:
+  a lure runs osascript, which shells out and downloads a second stage.
+  Any single link is ambiguous; the full chain across process lineage is
+  high-confidence malicious.
+window_seconds: 300
+stages:
+  - name: "osascript_parent"
+    match:
+      process_name: "osascript"
+  - name: "spawned_shell"
+    relation: descendant
+    match:
+      process_name_any:
+        - "sh"
+        - "bash"
+        - "zsh"
+  - name: "payload_download"
+    relation: descendant
+    match:
+      process_name_any:
+        - "curl"
+        - "wget"
+      command_contains_any:
+        - "http://"
+        - "https://"
+        - "ftp://"
+false_positives:
+  - "Administrative AppleScript automation that fetches configuration over HTTPS."
+  - "Packaged apps that legitimately shell out to download updates."
+response:
+  - "Capture the AppleScript source, the shell command, and the retrieved payload."
+  - "Identify the application that launched osascript."
+  - "Block the remote host and search for the payload across the fleet."
+  - "Isolate the host if the downloaded content executed."

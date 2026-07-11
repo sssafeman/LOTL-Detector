@@ -2,7 +2,7 @@
 
 Maps every bundled rule to MITRE ATT&CK techniques and the LOLBAS
 (Windows) or GTFOBins (Linux) entry it detects abuse of. Generated
-against 27 atomic rules (11 Windows, 11 Linux, 5 macOS) and 4
+against 27 atomic rules (11 Windows, 11 Linux, 5 macOS) and 5
 correlation chains.
 
 Regenerate the inventory with:
@@ -68,6 +68,7 @@ technique lists span the full behavior sequence.
 | CHAIN-WIN-002 | Script Host to LOLBin Downloader | high | T1059.005 Visual Basic, T1218 System Binary Proxy, T1105 Ingress Tool Transfer |
 | CHAIN-LNX-001 | Web Server to Shell to Payload Retrieval | critical | T1190 Exploit Public-Facing App, T1059.004 Unix Shell, T1105 Ingress Tool Transfer |
 | CHAIN-LNX-002 | Cron to Shell to Remote Download | high | T1053.003 Cron, T1059.004 Unix Shell, T1105 Ingress Tool Transfer |
+| CHAIN-MAC-001 | Osascript to Shell to Network Download | critical | T1059.002 AppleScript, T1059.004 Unix Shell, T1105 Ingress Tool Transfer |
 
 ## Coverage by ATT&CK Tactic
 

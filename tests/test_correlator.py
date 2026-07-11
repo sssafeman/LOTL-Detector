@@ -188,7 +188,8 @@ class TestChainRuleLoading:
         chains = load_chain_rules()
         ids = {c.id for c in chains}
         assert {"CHAIN-WIN-001", "CHAIN-WIN-002",
-                "CHAIN-LNX-001", "CHAIN-LNX-002"} <= ids
+                "CHAIN-LNX-001", "CHAIN-LNX-002",
+                "CHAIN-MAC-001"} <= ids
         for chain in chains:
             assert len(chain.stages) >= 2
             assert chain.window_seconds > 0
@@ -316,6 +317,29 @@ class TestCorrelation:
             if i.chain_id == "CHAIN-LNX-001"
         ]
         assert incidents == []
+
+    def test_macos_osascript_chain_from_fixture(self, correlator):
+        from collectors.macos.collector import MacOSCollector
+        events = MacOSCollector().collect_events(
+            "tests/fixtures/macos/malicious_chain_mac001_osascript_download.ndjson"
+        )
+        assert len(events) == 3
+        incidents = correlator.correlate(events)
+        assert len(incidents) == 1
+        incident = incidents[0]
+        assert incident.chain_id == "CHAIN-MAC-001"
+        assert incident.risk_band == "critical"
+        assert [s["stage"] for s in incident.stages] == [
+            "osascript_parent", "spawned_shell", "payload_download",
+        ]
+
+    def test_macos_chain_needs_download_stage(self, correlator):
+        # osascript then shell, but the shell does not spawn a downloader.
+        from collectors.macos.collector import MacOSCollector
+        events = MacOSCollector().collect_events(
+            "tests/fixtures/macos/malicious_chain_mac001_osascript_download.ndjson"
+        )
+        assert correlator.correlate(events[:2]) == []
 
     def test_stage_with_command_criteria_rejects_phantom(self, correlator):
         # Only the shell event: nginx parent is phantom (allowed for stage 1,
