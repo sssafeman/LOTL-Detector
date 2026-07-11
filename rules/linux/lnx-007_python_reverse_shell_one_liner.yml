@@ -1,0 +1,36 @@
+name: "Python Reverse Shell One-Liner"
+id: "LNX-007"
+platform: linux
+severity: critical
+mitre_attack:
+  - T1059.006
+description: |
+  Detects a Python command line combining socket creation, file descriptor
+  duplication, and subprocess execution. This combination is characteristic
+  of Python reverse shells used after web application or service compromise.
+detection:
+  command_contains:
+    - "socket"
+    - "dup2"
+    - "subprocess"
+  command_contains_any:
+    - "python -c"
+    - "python3 -c"
+    - "python2 -c"
+  command_regex: '(?i)python[0-9.]*\s+-c\s+.*socket.*dup2.*subprocess'
+false_positives:
+  - "Authorized penetration testing or exploit validation."
+  - "A rare diagnostic one-liner that intentionally redirects process descriptors over a socket."
+whitelist:
+  parent_processes:
+    - "security-test-runner"
+  users:
+    - "redteam"
+  paths:
+    - "/opt/company/security-tests/"
+response:
+  - "Immediately identify and block the remote IP address and port."
+  - "Capture the complete process tree and active network connections."
+  - "Determine which exposed service or user session launched Python."
+  - "Preserve relevant shell history, web logs, temporary files, and process telemetry."
+  - "Isolate the host when the activity is not an approved security test."

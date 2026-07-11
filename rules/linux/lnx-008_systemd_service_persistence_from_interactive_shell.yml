@@ -1,0 +1,36 @@
+name: "Systemd Service Persistence from Interactive Shell"
+id: "LNX-008"
+platform: linux
+severity: high
+mitre_attack:
+  - T1543.002
+description: |
+  Detects a shell command writing or moving a service unit into a systemd
+  service directory. Attackers use malicious units for privileged execution
+  and persistence across reboots.
+detection:
+  command_contains_any:
+    - "/etc/systemd/system/"
+    - "/usr/lib/systemd/system/"
+    - "/lib/systemd/system/"
+  command_regex: '(?i)(echo|printf|tee|cp|mv|install|cat|curl|wget|dd).*(/etc/systemd/system/|/usr/lib/systemd/system/|/lib/systemd/system/).+\.service'
+false_positives:
+  - "An administrator manually deploying an internally developed service."
+  - "Package installation or configuration-management activity creating a service unit."
+whitelist:
+  parent_processes:
+    - "dpkg"
+    - "rpm"
+    - "ansible-playbook"
+    - "puppet"
+    - "salt-call"
+  users:
+    - "svc_configuration"
+  paths:
+    - "/opt/company/systemd/"
+response:
+  - "Acquire the new or modified unit and inspect ExecStart, ExecStartPre, environment, and user settings."
+  - "Check whether the service was enabled, started, or followed by a daemon reload."
+  - "Hash and analyze every executable or script referenced by the unit."
+  - "Review sudo, package-manager, and interactive login activity preceding the write."
+  - "Disable the unit only after preserving evidence and confirming it is unauthorized."

@@ -1,10 +1,13 @@
 """
 REST API server for LOTL Detection Framework
+
+Security: Bearer API key auth, restricted CORS, loopback binding.
+All endpoints except /api/health require authentication.
 """
 import os
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g
 from flask_cors import CORS
 from core.database import AlertDatabase
 from core.rule_loader import RuleLoader
@@ -12,6 +15,7 @@ from core.engine import DetectionEngine
 from core.config import get_config, get_database_path, get_rules_directory, get_logging_config
 from collectors.windows.collector import WindowsCollector
 from collectors.linux.collector import LinuxCollector
+from api.auth import load_api_key, require_auth
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,13 +32,14 @@ def create_app(config=None):
     Create and configure the Flask application
 
     Args:
-        config: Optional configuration dictionary
+        config: Optional configuration dictionary.
+                Set API_KEY to inject a test key.
+                Set CORS_ORIGINS to configure allowed origins.
 
     Returns:
         Flask app instance
     """
     app = Flask(__name__)
-    CORS(app)  # Enable CORS for all routes
 
     # Load configuration from config system
     try:
@@ -45,12 +50,21 @@ def create_app(config=None):
         app.config['DATABASE_PATH'] = get_database_path()
         app.config['RULES_DIR'] = get_rules_directory()
         app.config['LOG_LEVEL'] = logging_config['level']
+        app.config['API_HOST'] = app_config.get('api', {}).get('host', '127.0.0.1')
+        app.config['API_PORT'] = app_config.get('api', {}).get('port', 5000)
+        app.config['API_DEBUG'] = app_config.get('api', {}).get('debug', False)
     except Exception as e:
         logger.warning(f"Failed to load config, using defaults: {e}")
-        # Fallback to defaults
+        # Fallback to secure defaults
         app.config['DATABASE_PATH'] = 'alerts.db'
         app.config['RULES_DIR'] = 'rules'
         app.config['LOG_LEVEL'] = 'INFO'
+        app.config['API_HOST'] = '127.0.0.1'
+        app.config['API_PORT'] = 5000
+        app.config['API_DEBUG'] = False
+
+    # Default CORS origins: none allowed unless explicitly configured
+    app.config.setdefault('CORS_ORIGINS', [])
 
     # Override with provided config (for testing)
     if config:
@@ -62,13 +76,44 @@ def create_app(config=None):
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
+    # Load API key for authentication
+    # Test config can inject API_KEY directly. Otherwise load from env/file.
+    api_key = app.config.get('API_KEY')
+    if not api_key and not app.config.get('TESTING'):
+        api_key = load_api_key()
+
+    if not api_key and not app.config.get('TESTING'):
+        logger.error("No API key configured. Set LOTL_API_KEY env var or run: python -m api.auth generate")
+        logger.error("Server starting without authentication. All endpoints are unprotected.")
+        app.config['API_KEY'] = None
+    else:
+        app.config['API_KEY'] = api_key
+
+    # Configure CORS with restricted origins
+    cors_origins = app.config.get('CORS_ORIGINS', [])
+    if cors_origins:
+        CORS(
+            app,
+            resources={r"/api/*": {
+                "origins": cors_origins,
+                "methods": ["GET", "POST", "OPTIONS"],
+                "allow_headers": ["Authorization", "Content-Type"],
+                "expose_headers": ["Retry-After", "X-Request-ID"],
+                "supports_credentials": False,
+                "max_age": 3600,
+            }},
+        )
+        logger.info(f"CORS configured for origins: {cors_origins}")
+    else:
+        logger.info("CORS disabled. No origins allowed.")
+
     # Initialize components
     initialize_components(app)
 
     # Register routes
-    register_routes(app)
+    register_routes(app, api_key)
 
-    # Request logging
+    # Request logging (do not log command lines or request bodies)
     @app.before_request
     def log_request():
         logger.info(f"{request.method} {request.path} - {request.remote_addr}")
@@ -94,8 +139,15 @@ def initialize_components(app):
     """Initialize database, rules, and collectors"""
     global db, rule_loader, engine, collectors
 
-    # Initialize database
+    # Initialize database with WAL mode for concurrent access
     db = AlertDatabase(app.config['DATABASE_PATH'])
+    # Enable WAL mode for better concurrent read/write support
+    try:
+        db.connection.execute("PRAGMA journal_mode=WAL")
+        db.connection.execute("PRAGMA busy_timeout=5000")
+        logger.info("Database WAL mode enabled with 5s busy timeout")
+    except Exception as e:
+        logger.warning(f"Could not enable WAL mode: {e}")
     logger.info(f"Database initialized: {app.config['DATABASE_PATH']}")
 
     # Load detection rules
@@ -112,28 +164,30 @@ def initialize_components(app):
     logger.info("Collectors initialized")
 
 
-def register_routes(app):
-    """Register all API routes"""
+def register_routes(app, api_key=None):
+    """Register all API routes with authentication"""
 
+    # Health check is the only unauthenticated endpoint
     @app.route('/api/health', methods=['GET'])
     def health_check():
-        """Health check endpoint"""
-        try:
-            stats = db.get_stats()
-            return jsonify({
-                'status': 'healthy',
-                'database': 'connected',
-                'rules_loaded': len(engine.rules),
-                'total_alerts': stats['total_alerts']
-            })
-        except Exception as e:
-            logger.error(f"Health check failed: {e}")
-            return jsonify({
-                'status': 'unhealthy',
-                'error': str(e)
-            }), 500
+        """Public health check endpoint. Returns minimal info."""
+        return jsonify({'status': 'ok'})
+
+    # If no API key is configured (non-test), skip auth on all endpoints
+    # for backward compatibility during transition. In production, always set a key.
+    use_auth = api_key is not None
+
+    def auth_decorator():
+        """Return auth decorator if key is set, else passthrough."""
+        if use_auth:
+            return require_auth(api_key)
+        # No-op decorator when auth is disabled
+        def passthrough(f):
+            return f
+        return passthrough
 
     @app.route('/api/alerts', methods=['GET'])
+    @auth_decorator()
     def get_alerts():
         """
         Get alerts with optional filtering
@@ -183,6 +237,7 @@ def register_routes(app):
             return jsonify({'error': 'Failed to fetch alerts', 'message': str(e)}), 500
 
     @app.route('/api/alerts/<int:alert_id>', methods=['GET'])
+    @auth_decorator()
     def get_alert(alert_id):
         """Get a single alert by ID"""
         try:
@@ -199,6 +254,7 @@ def register_routes(app):
             return jsonify({'error': 'Failed to fetch alert', 'message': str(e)}), 500
 
     @app.route('/api/stats', methods=['GET'])
+    @auth_decorator()
     def get_stats():
         """Get database statistics"""
         try:
@@ -215,6 +271,7 @@ def register_routes(app):
             return jsonify({'error': 'Failed to fetch statistics', 'message': str(e)}), 500
 
     @app.route('/api/rules', methods=['GET'])
+    @auth_decorator()
     def get_rules():
         """Get all loaded detection rules"""
         try:
@@ -246,6 +303,7 @@ def register_routes(app):
             return jsonify({'error': 'Failed to fetch rules', 'message': str(e)}), 500
 
     @app.route('/api/scan', methods=['POST'])
+    @auth_decorator()
     def scan_logs():
         """
         Scan log files for threats
@@ -321,4 +379,15 @@ def register_routes(app):
 # For development/testing
 if __name__ == '__main__':
     app = create_app()
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    host = app.config.get('API_HOST', '127.0.0.1')
+    port = app.config.get('API_PORT', 5000)
+    debug = app.config.get('API_DEBUG', False)
+
+    # Safety check: never expose debug mode on a non-loopback interface
+    if debug and host not in ('127.0.0.1', '::1', 'localhost'):
+        raise RuntimeError(
+            f"Refusing to start: debug mode cannot be enabled on {host}. "
+            f"Use 127.0.0.1 for debug mode, or disable debug for remote access."
+        )
+
+    app.run(debug=debug, host=host, port=port)

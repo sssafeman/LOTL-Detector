@@ -1,0 +1,36 @@
+name: "CMSTP Suspicious INF Execution"
+id: "WIN-011"
+platform: windows
+severity: high
+mitre_attack:
+  - T1218.003
+description: |
+  Detects cmstp.exe silently processing an INF file from a user-writable
+  directory. Malicious INF files can use CMSTP sections to proxy arbitrary
+  command execution through a trusted Windows binary.
+detection:
+  process_name: "cmstp.exe"
+  command_contains:
+    - "/s"
+  command_contains_any:
+    - "\\AppData\\"
+    - "\\Downloads\\"
+    - "\\Temp\\"
+    - "C:\\Users\\Public\\"
+  command_regex: '(?i)(?:\\AppData\\|\\Downloads\\|\\Temp\\|C:\\Users\\Public\\).+\.inf(?:\s|$)'
+false_positives:
+  - "Legacy VPN or connection-profile software installing a documented INF from a user directory."
+  - "Authorized application-control or privilege-escalation testing."
+whitelist:
+  parent_processes:
+    - "CompanyVpnInstaller.exe"
+  users:
+    - "svc_vpn_deploy"
+  paths:
+    - "C:\\ProgramData\\Company\\VPN\\"
+response:
+  - "Acquire and inspect the referenced INF file."
+  - "Review RunPreSetupCommands, RegisterOCX, and other executable sections."
+  - "Inspect the parent process and any processes launched near the CMSTP event."
+  - "Check whether the INF originated from email, browser, archive, or remote access software."
+  - "Contain the endpoint if the profile was not installed by approved software."

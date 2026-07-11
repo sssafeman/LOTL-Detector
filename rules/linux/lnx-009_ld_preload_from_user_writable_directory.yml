@@ -1,0 +1,38 @@
+name: "LD_PRELOAD from User-Writable Directory"
+id: "LNX-009"
+platform: linux
+severity: high
+mitre_attack:
+  - T1574.006
+description: |
+  Detects LD_PRELOAD referencing a shared object in a common user-writable
+  or memory-backed directory. Attackers use this mechanism to inject code
+  into trusted processes, hide activity, or obtain execution in another
+  process context.
+detection:
+  command_contains:
+    - "LD_PRELOAD="
+  command_contains_any:
+    - "/tmp/"
+    - "/var/tmp/"
+    - "/dev/shm/"
+    - "/run/user/"
+  command_regex: '(?i)LD_PRELOAD\s*=\s*[^ ]*(/tmp/|/var/tmp/|/dev/shm/|/run/user/)[^ ]+\.so'
+false_positives:
+  - "Developers testing an instrumented shared library from a temporary build directory."
+  - "Approved profiling, compatibility, sandboxing, or debugging tools."
+whitelist:
+  parent_processes:
+    - "gdb"
+    - "rr"
+    - "valgrind"
+  users:
+    - "svc_build"
+  paths:
+    - "/opt/company/testing/preload/"
+response:
+  - "Acquire and hash the referenced shared object."
+  - "Identify every process launched with the modified loader environment."
+  - "Inspect the shared object with static and behavioral analysis."
+  - "Search shell profiles, service units, sudo configuration, and loader configuration for persistence."
+  - "Determine how the shared object entered the writable directory."

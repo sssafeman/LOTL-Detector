@@ -46,7 +46,7 @@ def test_load_config_with_defaults():
     assert config['database']['path'] == 'alerts.db'
     assert config['rules']['directory'] == 'rules/'
     assert config['logging']['level'] == 'INFO'
-    assert config['api']['host'] == '0.0.0.0'
+    assert config['api']['host'] == '127.0.0.1'
     assert config['api']['port'] == 5000
     assert config['api']['debug'] is False
 
@@ -72,7 +72,7 @@ def test_load_config_from_file(temp_config_file):
     # Should merge with defaults
     assert config['database']['path'] == 'custom_alerts.db'
     assert config['api']['port'] == 8080
-    assert config['api']['host'] == '0.0.0.0'  # Default value
+    assert config['api']['host'] == '127.0.0.1'  # Default value
     assert config['rules']['directory'] == 'rules/'  # Default value
 
 
@@ -181,7 +181,7 @@ def test_get_api_config():
     """Test getting API configuration"""
     reset_config_cache()
     api_config = get_api_config()
-    assert api_config['host'] == '0.0.0.0'
+    assert api_config['host'] == '127.0.0.1'
     assert api_config['port'] == 5000
     assert api_config['debug'] is False
 
@@ -238,7 +238,7 @@ def test_partial_config_override(temp_config_file):
     assert config['api']['port'] == 9000
 
     # Default values should still be present
-    assert config['api']['host'] == '0.0.0.0'
+    assert config['api']['host'] == '127.0.0.1'
     assert config['api']['debug'] is False
     assert config['database']['path'] == 'alerts.db'
     assert config['rules']['directory'] == 'rules/'

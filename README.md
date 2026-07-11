@@ -9,7 +9,7 @@ LOTL Detector identifies suspicious use of legitimate system utilities commonly 
 ### Supported Platforms
 - Windows (Sysmon, Event Logs)
 - Linux (auditd, syslog) 
-- macOS (Unified Logs) - Coming soon
+- macOS (Unified Logs) - Not yet implemented, planned for future release
 
 ## Architecture
 
@@ -531,11 +531,11 @@ print(f"Generated {result['alerts_generated']} alerts")
 
 ## Development
 
-### Team Structure
-- **Person 1 (Core):** Detection engine, rule system, project coordination
-- **Person 2 (Windows):** Windows collector and rules
-- **Person 3 (Linux):** Linux collector and rules
-- **Person 4 (API):** REST API and dashboard
+### Project Structure
+- **Core:** Detection engine, rule system, scoring, configuration
+- **Windows:** Sysmon parser, Windows collector, Windows rules
+- **Linux:** auditd parser, Linux collector, Linux rules
+- **API:** REST API server, web dashboard, query tools
 
 ### Branch Strategy
 - `main`: Stable releases only
@@ -574,12 +574,12 @@ print(f"Generated {result['alerts_generated']} alerts")
 
 ### Planned Expansions
 
-- PowerShell encoded commands
-- WMI lateral movement
-- Regsvr32 DLL execution
-- BITSAdmin abuse
-- macOS unified log support
-- Advanced behavioral correlation
+- macOS unified log support (not yet implemented)
+- Real-time agents using ETW (Windows) and eBPF (Linux)
+- Machine learning-based anomaly detection
+- Process tree correlation
+- Advanced behavioral correlation across events
+- SIEM integration (CEF/syslog export)
 
 ## License
 

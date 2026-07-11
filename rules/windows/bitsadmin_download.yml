@@ -15,7 +15,7 @@ description: |
 
 detection:
   process_name: "bitsadmin.exe"
-  command_contains_all:
+  command_contains:
     - "/transfer"
     - "http"
 

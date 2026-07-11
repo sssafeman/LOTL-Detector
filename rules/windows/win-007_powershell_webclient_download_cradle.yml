@@ -1,0 +1,35 @@
+name: "PowerShell WebClient Download Cradle"
+id: "WIN-007"
+platform: windows
+severity: high
+mitre_attack:
+  - T1059.001
+  - T1105
+description: |
+  Detects PowerShell downloading content through Net.WebClient and passing
+  the result to Invoke-Expression. This is a common in-memory payload staging
+  pattern used during initial access, lateral movement, and command execution.
+detection:
+  process_name: "powershell.exe"
+  command_contains:
+    - "Net.WebClient"
+    - "DownloadString"
+  command_contains_any:
+    - "IEX"
+    - "Invoke-Expression"
+false_positives:
+  - "Legacy administrative scripts that load trusted modules from an internal web server."
+  - "Authorized adversary simulation and penetration testing."
+whitelist:
+  parent_processes:
+    - "DeployAgent.exe"
+  users:
+    - "svc_automation"
+  paths:
+    - "C:\\ProgramData\\Company\\Deployment\\"
+response:
+  - "Capture the complete PowerShell command and extract the remote URL."
+  - "Review proxy, DNS, and endpoint network events for the destination."
+  - "Determine whether the downloaded content executed in memory or wrote additional files."
+  - "Trace the parent and grandparent processes to identify the initial execution vector."
+  - "Isolate the endpoint if the URL or execution chain is not authorized."

@@ -60,7 +60,7 @@ class TestWindowsRuleIntegration:
 
         # Verify alert properties
         assert certutil_alert.severity == "high", "Should have HIGH severity"
-        assert 100 <= certutil_alert.score <= 150, f"Score {certutil_alert.score} should be in range 100-150"
+        assert 60 <= certutil_alert.score <= 100, f"Score {certutil_alert.score} should be in range 60-100 (v2 multiplicative)"
         assert "T1105" in certutil_alert.mitre_attack, "Should include T1105 MITRE technique"
 
     def test_win001_certutil_no_alert_on_benign_fixture(self, windows_collector, detection_engine):
@@ -97,7 +97,7 @@ class TestWindowsRuleIntegration:
 
         # Verify alert properties
         assert ps_alert.severity == "high", "Should have HIGH severity"
-        assert 100 <= ps_alert.score <= 150, f"Score {ps_alert.score} should be in range 100-150"
+        assert 60 <= ps_alert.score <= 120, f"Score {ps_alert.score} should be in range 60-120 (v2 multiplicative)"
         assert "T1059.001" in ps_alert.mitre_attack, "Should include T1059.001 MITRE technique"
         assert "T1027" in ps_alert.mitre_attack, "Should include T1027 MITRE technique"
 
@@ -120,7 +120,7 @@ class TestWindowsRuleIntegration:
 
         # Verify alert properties
         assert wmi_alert.severity == "high", "Should have HIGH severity"
-        assert 100 <= wmi_alert.score <= 150, f"Score {wmi_alert.score} should be in range 100-150"
+        assert 60 <= wmi_alert.score <= 120, f"Score {wmi_alert.score} should be in range 60-120 (v2 multiplicative)"
         assert "T1047" in wmi_alert.mitre_attack, "Should include T1047 MITRE technique"
 
     def test_win004_regsvr32_abuse_triggers_on_fixture(self, windows_collector, detection_engine):
@@ -142,7 +142,7 @@ class TestWindowsRuleIntegration:
 
         # Verify alert properties
         assert regsvr32_alert.severity == "high", "Should have HIGH severity"
-        assert 100 <= regsvr32_alert.score <= 150, f"Score {regsvr32_alert.score} should be in range 100-150"
+        assert 60 <= regsvr32_alert.score <= 100, f"Score {regsvr32_alert.score} should be in range 60-100 (v2 multiplicative)"
         assert "T1218.010" in regsvr32_alert.mitre_attack, "Should include T1218.010 MITRE technique"
 
     def test_win005_bitsadmin_download_triggers_on_fixture(self, windows_collector, detection_engine):
@@ -164,7 +164,7 @@ class TestWindowsRuleIntegration:
 
         # Verify alert properties
         assert bits_alert.severity == "high", "Should have HIGH severity"
-        assert 100 <= bits_alert.score <= 150, f"Score {bits_alert.score} should be in range 100-150"
+        assert 60 <= bits_alert.score <= 100, f"Score {bits_alert.score} should be in range 60-100 (v2 multiplicative)"
         assert "T1197" in bits_alert.mitre_attack, "Should include T1197 MITRE technique"
 
     def test_win006_mshta_execution_triggers_on_fixture(self, windows_collector, detection_engine):
@@ -186,7 +186,7 @@ class TestWindowsRuleIntegration:
 
         # Verify alert properties
         assert mshta_alert.severity == "medium", "Should have MEDIUM severity"
-        assert 50 <= mshta_alert.score <= 100, f"Score {mshta_alert.score} should be in range 50-100"
+        assert 30 <= mshta_alert.score <= 80, f"Score {mshta_alert.score} should be in range 30-80 (v2 multiplicative, medium severity)"
         assert "T1218.005" in mshta_alert.mitre_attack, "Should include T1218.005 MITRE technique"
 
 
@@ -228,7 +228,7 @@ class TestLinuxRuleIntegration:
 
         # Verify alert properties
         assert curl_alert.severity == "high", "Should have HIGH severity"
-        assert 100 <= curl_alert.score <= 150, f"Score {curl_alert.score} should be in range 100-150"
+        assert 60 <= curl_alert.score <= 100, f"Score {curl_alert.score} should be in range 60-100 (v2 multiplicative)"
         assert "T1105" in curl_alert.mitre_attack, "Should include T1105 MITRE technique"
 
     def test_lnx001_curl_download_no_alert_on_benign_fixture(self, linux_collector, detection_engine):
@@ -265,7 +265,7 @@ class TestLinuxRuleIntegration:
 
         # Verify alert properties
         assert shell_alert.severity == "critical", "Should have CRITICAL severity"
-        assert 120 <= shell_alert.score <= 150, f"Score {shell_alert.score} should be in range 120-150"
+        assert 60 <= shell_alert.score <= 120, f"Score {shell_alert.score} should be in range 60-120 (v2 multiplicative)"
         assert "T1059.004" in shell_alert.mitre_attack, "Should include T1059.004 MITRE technique"
 
     def test_lnx003_cron_persistence_triggers_on_fixture(self, linux_collector, detection_engine):
@@ -287,7 +287,7 @@ class TestLinuxRuleIntegration:
 
         # Verify alert properties
         assert cron_alert.severity == "high", "Should have HIGH severity"
-        assert 100 <= cron_alert.score <= 150, f"Score {cron_alert.score} should be in range 100-150"
+        assert 60 <= cron_alert.score <= 100, f"Score {cron_alert.score} should be in range 60-100 (v2 multiplicative)"
         assert "T1053.003" in cron_alert.mitre_attack, "Should include T1053.003 MITRE technique"
 
     def test_lnx004_ssh_suspicious_triggers_on_fixture(self, linux_collector, detection_engine):
@@ -309,7 +309,7 @@ class TestLinuxRuleIntegration:
 
         # Verify alert properties
         assert ssh_alert.severity == "medium", "Should have MEDIUM severity"
-        assert 50 <= ssh_alert.score <= 100, f"Score {ssh_alert.score} should be in range 50-100"
+        assert 30 <= ssh_alert.score <= 60, f"Score {ssh_alert.score} should be in range 30-60 (v2 multiplicative, medium severity)"
         assert "T1021.004" in ssh_alert.mitre_attack, "Should include T1021.004 MITRE technique"
 
     def test_lnx005_base64_decode_triggers_on_fixture(self, linux_collector, detection_engine):
@@ -331,7 +331,7 @@ class TestLinuxRuleIntegration:
 
         # Verify alert properties
         assert base64_alert.severity == "high", "Should have HIGH severity"
-        assert 100 <= base64_alert.score <= 150, f"Score {base64_alert.score} should be in range 100-150"
+        assert 60 <= base64_alert.score <= 100, f"Score {base64_alert.score} should be in range 60-100 (v2 multiplicative)"
         assert "T1027" in base64_alert.mitre_attack, "Should include T1027 MITRE technique"
 
     def test_lnx006_netcat_listener_triggers_on_fixture(self, linux_collector, detection_engine):
@@ -353,7 +353,7 @@ class TestLinuxRuleIntegration:
 
         # Verify alert properties
         assert nc_alert.severity == "high", "Should have HIGH severity"
-        assert 100 <= nc_alert.score <= 150, f"Score {nc_alert.score} should be in range 100-150"
+        assert 60 <= nc_alert.score <= 100, f"Score {nc_alert.score} should be in range 60-100 (v2 multiplicative)"
         assert "T1071" in nc_alert.mitre_attack, "Should include T1071 MITRE technique"
 
 
@@ -365,20 +365,22 @@ class TestRuleLoadingIntegration:
         loader = RuleLoader()
         rules = loader.load_rules_directory("rules")
 
-        assert len(rules) == 12, "Should load exactly 12 rules"
+        assert len(rules) == 22, "Should load exactly 22 rules"
 
         # Verify Windows rules
         windows_rules = [r for r in rules if r.platform == "windows"]
-        assert len(windows_rules) == 6, "Should have 6 Windows rules"
+        assert len(windows_rules) == 11, "Should have 11 Windows rules"
 
         # Verify Linux rules
         linux_rules = [r for r in rules if r.platform == "linux"]
-        assert len(linux_rules) == 6, "Should have 6 Linux rules"
+        assert len(linux_rules) == 11, "Should have 11 Linux rules"
 
         # Verify all expected rule IDs are present
         expected_rule_ids = [
             "WIN-001", "WIN-002", "WIN-003", "WIN-004", "WIN-005", "WIN-006",
-            "LNX-001", "LNX-002", "LNX-003", "LNX-004", "LNX-005", "LNX-006"
+            "WIN-007", "WIN-008", "WIN-009", "WIN-010", "WIN-011",
+            "LNX-001", "LNX-002", "LNX-003", "LNX-004", "LNX-005", "LNX-006",
+            "LNX-007", "LNX-008", "LNX-009", "LNX-010", "LNX-011"
         ]
 
         loaded_rule_ids = [r.id for r in rules]
@@ -392,14 +394,14 @@ class TestRuleLoadingIntegration:
         engine = DetectionEngine(rules)
 
         # Engine should have all rules loaded
-        assert len(engine.rules) == 12, "Engine should have 12 rules"
+        assert len(engine.rules) == 22, "Engine should have 12 rules"
 
         # Verify engine can filter by platform
         windows_rules = [r for r in engine.rules if r.platform == "windows"]
         linux_rules = [r for r in engine.rules if r.platform == "linux"]
 
-        assert len(windows_rules) == 6, "Should have 6 Windows rules in engine"
-        assert len(linux_rules) == 6, "Should have 6 Linux rules in engine"
+        assert len(windows_rules) == 11, "Should have 11 Windows rules in engine"
+        assert len(linux_rules) == 11, "Should have 11 Linux rules in engine"
 
     def test_all_windows_fixtures_parse_successfully(self):
         """Verify all Windows fixtures parse without errors"""

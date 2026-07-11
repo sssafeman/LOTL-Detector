@@ -1,0 +1,42 @@
+name: "SSH Authorized Keys Modification"
+id: "LNX-010"
+platform: linux
+severity: high
+mitre_attack:
+  - T1098.004
+description: |
+  Detects common shell utilities writing or appending content to an SSH
+  authorized_keys file. Attackers add their public key to establish durable,
+  passwordless access under an existing local account.
+detection:
+  command_contains:
+    - "authorized_keys"
+  command_contains_any:
+    - "echo "
+    - "printf "
+    - "tee "
+    - "cat "
+    - "curl "
+    - "wget "
+    - "cp "
+    - "sed "
+  command_regex: '(?i)(echo|printf|tee|cat|curl|wget|cp|sed).*(/\.ssh/authorized_keys|\.ssh/authorized_keys)'
+false_positives:
+  - "An administrator manually onboarding or rotating an approved SSH key."
+  - "Configuration-management or cloud-init tooling managing authorized keys."
+whitelist:
+  parent_processes:
+    - "ansible-playbook"
+    - "puppet"
+    - "salt-call"
+    - "cloud-init"
+  users:
+    - "svc_configuration"
+  paths:
+    - "/opt/company/ssh-key-management/"
+response:
+  - "Compare the resulting file against the approved key inventory."
+  - "Record the inserted key fingerprint, options, comment, owner, and modification time."
+  - "Review authentication logs for later use of the new key."
+  - "Investigate the writing process, parent process, login session, and privilege path."
+  - "Remove unauthorized keys and rotate related credentials after evidence collection."

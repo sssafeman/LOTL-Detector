@@ -38,13 +38,20 @@
     "detection": {
       "type": "object",
       "description": "Detection logic",
+      "minProperties": 1,
       "properties": {
         "process_name": {
           "type": "string"
         },
         "command_contains": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {"type": "string"},
+          "minItems": 1
+        },
+        "command_contains_any": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1
         },
         "command_regex": {
           "type": "string"
@@ -55,7 +62,8 @@
         "user_pattern": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "false_positives": {
       "type": "array",

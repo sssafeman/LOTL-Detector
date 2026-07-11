@@ -1,0 +1,29 @@
+name: "Rundll32 JavaScript Proxy Execution"
+id: "WIN-008"
+platform: windows
+severity: high
+mitre_attack:
+  - T1218.011
+description: |
+  Detects rundll32.exe invoking the MSHTML RunHTMLApplication export through
+  a JavaScript command. This highly specific pattern proxies script execution
+  through a signed Windows binary.
+detection:
+  process_name: "rundll32.exe"
+  command_regex: '(?i)javascript\s*:\s*.*mshtml\s*,\s*RunHTMLApplication'
+false_positives:
+  - "Authorized security testing that validates application-control bypasses."
+  - "A legacy application using this undocumented execution pattern, which should be independently verified."
+whitelist:
+  parent_processes:
+    - "SecurityTestHarness.exe"
+  users:
+    - "svc_redteam"
+  paths:
+    - "C:\\Program Files\\Company\\SecurityTests\\"
+response:
+  - "Preserve the complete command line and decode any embedded JavaScript."
+  - "Inspect the parent process and initiating user session."
+  - "Search for child processes, script files, and network connections associated with rundll32.exe."
+  - "Hunt for the same command fragment across other endpoints."
+  - "Isolate the endpoint when the activity is not part of an approved test."

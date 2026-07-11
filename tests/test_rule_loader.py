@@ -98,7 +98,7 @@ def test_all_windows_rules_loaded():
     windows_rules = loader.get_rules_by_platform("windows")
 
     # Verify we have exactly 6 Windows rules
-    assert len(windows_rules) == 6
+    assert len(windows_rules) == 11
 
     # Verify all expected rule IDs are present
     expected_ids = ["WIN-001", "WIN-002", "WIN-003", "WIN-004", "WIN-005", "WIN-006"]

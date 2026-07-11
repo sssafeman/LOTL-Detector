@@ -1,0 +1,41 @@
+name: "Wget Download and Immediate Execution"
+id: "LNX-011"
+platform: linux
+severity: high
+mitre_attack:
+  - T1105
+  - T1059.004
+description: |
+  Detects a shell command using wget to retrieve content and immediately pass
+  it to a shell or save it in a temporary directory before execution. This is
+  a common malware, cryptominer, botnet, and hands-on-keyboard staging pattern.
+detection:
+  command_contains:
+    - "wget"
+  command_contains_any:
+    - "| bash"
+    - "| sh"
+    - "|bash"
+    - "|sh"
+    - "/tmp/"
+    - "/var/tmp/"
+    - "/dev/shm/"
+  command_regex: '(?i)wget\s+.*(\|\s*(ba)?sh|(/tmp/|/var/tmp/|/dev/shm/).*(chmod|bash|sh|python|perl|\./))'
+false_positives:
+  - "A documented bootstrap script retrieved from a trusted internal repository."
+  - "A controlled CI job downloading and executing a temporary build dependency."
+whitelist:
+  parent_processes:
+    - "gitlab-runner"
+    - "jenkins"
+    - "company-bootstrap"
+  users:
+    - "svc_ci"
+  paths:
+    - "/opt/company/bootstrap/"
+response:
+  - "Extract the source URL, resolved IP address, destination path, and execution command."
+  - "Acquire the downloaded content and calculate its hashes."
+  - "Review DNS, proxy, process, and network telemetry for related activity."
+  - "Check for persistence, additional downloads, credential access, and outbound scanning."
+  - "Contain the host if the source or resulting executable is not approved."

@@ -38,7 +38,6 @@ LOTL Detector follows a modular, platform-agnostic architecture.
 │ Windows  │        │  Linux   │
 │Collector │        │Collector │
 │          │        │          │
-│ Person 2 │        │ Person 3 │
 └────┬─────┘        └────┬─────┘
      │                   │
      ▼                   ▼
@@ -80,7 +79,7 @@ Human-readable, version-controlled, and validated against JSON Schema.
 
 **Benefits:**
 - Enforces consistency
-- Person 2 and 3 work independently
+- Platform collectors can be developed independently
 - Easy to mock for testing
 
 ## Database Schema

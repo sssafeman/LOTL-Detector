@@ -82,14 +82,15 @@ def sample_alerts(temp_db):
 
 
 def test_health_check(client):
-    """Test health check endpoint"""
+    """Test health check endpoint returns minimal public info"""
     response = client.get('/api/health')
     assert response.status_code == 200
 
     data = response.get_json()
-    assert data['status'] == 'healthy'
-    assert 'database' in data
-    assert 'rules_loaded' in data
+    assert data['status'] == 'ok'
+    # Health check should NOT expose internal details without auth
+    assert 'database' not in data
+    assert 'rules_loaded' not in data
 
 
 def test_get_alerts(client, sample_alerts):
@@ -297,12 +298,12 @@ def test_invalid_time_format(client):
 
 
 def test_cors_headers(client):
-    """Test that CORS headers are present"""
+    """Test that CORS headers are NOT present when no origins are configured"""
     response = client.get('/api/health')
     assert response.status_code == 200
 
-    # CORS should add Access-Control-Allow-Origin header
-    assert 'Access-Control-Allow-Origin' in response.headers
+    # With default config (no CORS origins), no CORS headers should be present
+    assert 'Access-Control-Allow-Origin' not in response.headers
 
 
 def test_404_for_unknown_route(client):
