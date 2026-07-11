@@ -2,6 +2,7 @@
 Detection engine - matches events against rules to generate alerts
 """
 import re
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
@@ -14,6 +15,32 @@ from core.command_analyzer import analyze_command
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_process_name(name: str, platform: str) -> str:
+    """
+    Extract and normalize the process basename for exact comparison.
+
+    Strips path prefixes, converts to lowercase on Windows, preserves
+    case on Linux. Removes trailing whitespace.
+
+    Args:
+        name: Process name or full path from event
+        platform: 'windows', 'linux', or 'macos'
+
+    Returns:
+        Normalized basename (e.g. 'powershell.exe', 'bash')
+    """
+    if not name:
+        return ""
+    # Extract basename from path
+    basename = os.path.basename(name.strip())
+    # Handle both / and \ separators
+    basename = basename.replace("\\", "/").split("/")[-1]
+    # Windows is case-insensitive, Linux is case-sensitive
+    if platform == "windows":
+        basename = basename.lower()
+    return basename
 
 
 @dataclass
@@ -188,13 +215,15 @@ class DetectionEngine:
             if key in detection and detection[key]:
                 configured.append(key)
 
-        # Check process name if specified
+        # Check process name if specified (exact basename match)
         if 'process_name' in detection:
             configured.append("process_name") if "process_name" not in configured else None
-            expected_process = detection['process_name'].lower()
-            actual_process = event.process_name.lower()
+            expected = detection['process_name'].strip()
+            # Normalize both to basenames for exact comparison
+            expected_base = normalize_process_name(expected, rule.platform)
+            actual_base = normalize_process_name(event.process_name, event.platform)
 
-            if expected_process not in actual_process:
+            if expected_base != actual_base:
                 return None
             matched.append("process_name")
 
@@ -223,30 +252,42 @@ class DetectionEngine:
             else:
                 return None
 
-        # Check command_regex if specified
+        # Check command_regex if specified (use precompiled pattern)
         if 'command_regex' in detection:
-            pattern = detection['command_regex']
-            if not re.search(pattern, event.command_line, re.IGNORECASE):
-                return None
+            compiled = rule.get_compiled_regex('command_regex')
+            if compiled:
+                if not compiled.search(event.command_line):
+                    return None
+            else:
+                # Fallback: should not happen if rule loaded correctly
+                pattern = detection['command_regex']
+                if not re.search(pattern, event.command_line, re.IGNORECASE):
+                    return None
             matched.append("command_regex")
 
-        # Check parent process if specified
+        # Check parent process if specified (exact basename match)
         if 'parent_process' in detection:
             if not event.parent_process_name:
                 return None
 
-            expected_parent = detection['parent_process'].lower()
-            actual_parent = event.parent_process_name.lower()
+            expected = detection['parent_process'].strip()
+            expected_base = normalize_process_name(expected, rule.platform)
+            actual_base = normalize_process_name(event.parent_process_name, event.platform)
 
-            if expected_parent not in actual_parent:
+            if expected_base != actual_base:
                 return None
             matched.append("parent_process")
 
-        # Check user pattern if specified
+        # Check user pattern if specified (use precompiled pattern)
         if 'user_pattern' in detection:
-            pattern = detection['user_pattern']
-            if not re.search(pattern, event.user, re.IGNORECASE):
-                return None
+            compiled = rule.get_compiled_regex('user_pattern')
+            if compiled:
+                if not compiled.search(event.user):
+                    return None
+            else:
+                pattern = detection['user_pattern']
+                if not re.search(pattern, event.user, re.IGNORECASE):
+                    return None
             matched.append("user_pattern")
 
         # All checks passed. Build and return match evidence.
@@ -284,7 +325,9 @@ class DetectionEngine:
         parent_reason = "missing_telemetry"
         rule_parent = rule.detection.get("parent_process")
         if rule_parent and event.parent_process_name:
-            if rule_parent.lower() in event.parent_process_name.lower():
+            expected_base = normalize_process_name(rule_parent, rule.platform)
+            actual_base = normalize_process_name(event.parent_process_name, event.platform)
+            if expected_base == actual_base:
                 parent_reason = "suspicious_parent_match"
             else:
                 parent_reason = "neutral_lineage"
@@ -341,11 +384,17 @@ class DetectionEngine:
                     logger.debug(f"Event whitelisted by user: {event.user}")
                     return True
 
-        # Check whitelisted parent processes
+        # Check whitelisted parent processes (exact basename match)
         if 'parent_processes' in whitelist and whitelist['parent_processes']:
             if event.parent_process_name:
+                actual_parent_base = normalize_process_name(
+                    event.parent_process_name, event.platform
+                )
                 for whitelisted_parent in whitelist['parent_processes']:
-                    if whitelisted_parent.lower() in event.parent_process_name.lower():
+                    expected_base = normalize_process_name(
+                        whitelisted_parent, event.platform
+                    )
+                    if expected_base == actual_parent_base:
                         logger.debug(f"Event whitelisted by parent process: {event.parent_process_name}")
                         return True
 

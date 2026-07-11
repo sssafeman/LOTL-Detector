@@ -30,6 +30,10 @@ DEFAULT_CONFIG = {
         'host': '127.0.0.1',
         'port': 5000,
         'debug': False
+    },
+    'scan': {
+        'allowed_roots': [],
+        'max_file_size_mb': 100
     }
 }
 

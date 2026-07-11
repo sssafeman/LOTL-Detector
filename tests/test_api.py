@@ -268,7 +268,7 @@ def test_scan_valid_request(client):
         data = response.get_json()
         assert 'events_processed' in data
         assert 'alerts_generated' in data
-        assert 'alert_ids' in data
+        assert 'results' in data
 
 
 def test_scan_linux_logs(client):

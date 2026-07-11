@@ -26,6 +26,40 @@ class Rule:
         self.whitelist = rule_dict.get('whitelist', {})
         self.response = rule_dict.get('response', [])
 
+        # Precompile regex patterns at load time for performance and early validation
+        self._compiled_regexes: Dict[str, Any] = {}
+        self._compile_regexes()
+
+    def _compile_regexes(self) -> None:
+        """Compile and cache regex patterns from the detection block."""
+        import re
+        # command_regex
+        cmd_pattern = self.detection.get('command_regex')
+        if cmd_pattern:
+            try:
+                self._compiled_regexes['command_regex'] = re.compile(
+                    cmd_pattern, re.IGNORECASE
+                )
+            except re.error as e:
+                raise ValueError(
+                    f"Rule {self.id} has invalid command_regex '{cmd_pattern}': {e}"
+                )
+        # user_pattern
+        user_pattern = self.detection.get('user_pattern')
+        if user_pattern:
+            try:
+                self._compiled_regexes['user_pattern'] = re.compile(
+                    user_pattern, re.IGNORECASE
+                )
+            except re.error as e:
+                raise ValueError(
+                    f"Rule {self.id} has invalid user_pattern '{user_pattern}': {e}"
+                )
+
+    def get_compiled_regex(self, name: str):
+        """Get a precompiled regex pattern by name."""
+        return self._compiled_regexes.get(name)
+
     def __repr__(self):
         return f"Rule(id={self.id}, name={self.name}, platform={self.platform})"
 

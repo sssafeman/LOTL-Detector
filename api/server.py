@@ -53,6 +53,10 @@ def create_app(config=None):
         app.config['API_HOST'] = app_config.get('api', {}).get('host', '127.0.0.1')
         app.config['API_PORT'] = app_config.get('api', {}).get('port', 5000)
         app.config['API_DEBUG'] = app_config.get('api', {}).get('debug', False)
+        # Load scan source restrictions from config
+        scan_config = app_config.get('scan', {})
+        app.config['ALLOWED_LOG_ROOTS'] = scan_config.get('allowed_roots', [])
+        app.config['MAX_FILE_SIZE_MB'] = scan_config.get('max_file_size_mb', 100)
     except Exception as e:
         logger.warning(f"Failed to load config, using defaults: {e}")
         # Fallback to secure defaults
@@ -337,34 +341,50 @@ def register_routes(app, api_key=None):
             if platform not in ['windows', 'linux']:
                 return jsonify({'error': 'platform must be "windows" or "linux"'}), 400
 
-            # Check if path exists
-            if not Path(log_path).exists():
-                return jsonify({'error': f'Log path does not exist: {log_path}'}), 400
+            # Validate log source for path traversal and safety
+            from core.source_validator import validate_log_source, SourceValidationError
+            allowed_roots = app.config.get('ALLOWED_LOG_ROOTS', [])
+            max_size_mb = app.config.get('MAX_FILE_SIZE_MB', 100)
+            max_size_bytes = max_size_mb * 1024 * 1024 if max_size_mb else 100 * 1024 * 1024
+            try:
+                validated_path = validate_log_source(
+                    log_path, platform,
+                    allowed_roots=allowed_roots,
+                    max_file_size=max_size_bytes,
+                )
+            except SourceValidationError as e:
+                return jsonify({'error': f'Invalid log source: {e}'}), 400
 
             # Get appropriate collector
             collector = collectors.get(platform)
             if not collector:
                 return jsonify({'error': f'No collector available for platform: {platform}'}), 400
 
-            # Collect events
-            logger.info(f"Scanning {platform} logs at {log_path}")
-            events = collector.collect_events(log_path)
+            # Collect events from validated path
+            logger.info(f"Scanning {platform} logs at {validated_path}")
+            events = collector.collect_events(validated_path)
             logger.info(f"Collected {len(events)} events")
 
             # Run detection
             alerts = engine.match_events(events)
             logger.info(f"Generated {len(alerts)} alerts")
 
-            # Save alerts to database
-            alert_ids = []
+            # Save alerts to database with deduplication
+            results = []
             for alert in alerts:
-                alert_id = db.save_alert(alert)
-                alert_ids.append(alert_id)
+                result = db.save_alert_dedup(alert)
+                results.append(result)
+
+            new_count = sum(1 for r in results if not r["is_duplicate"] and not r.get("is_suppressed"))
+            dup_count = sum(1 for r in results if r["is_duplicate"])
+            supp_count = sum(1 for r in results if r.get("is_suppressed"))
 
             return jsonify({
                 'events_processed': len(events),
-                'alerts_generated': len(alerts),
-                'alert_ids': alert_ids
+                'alerts_generated': new_count,
+                'duplicates_updated': dup_count,
+                'suppressed': supp_count,
+                'results': results
             })
 
         except ValueError as e:
@@ -372,6 +392,68 @@ def register_routes(app, api_key=None):
         except Exception as e:
             logger.error(f"Error during scan: {e}")
             return jsonify({'error': 'Scan failed', 'message': str(e)}), 500
+
+    @app.route('/api/alerts/<int:alert_id>/state', methods=['POST'])
+    @auth_decorator()
+    def update_alert_state(alert_id):
+        """Update an alert's lifecycle state."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'Request body is required'}), 400
+
+            new_state = data.get('state')
+            author = data.get('author', 'api')
+            reason = data.get('reason', '')
+
+            if not new_state:
+                return jsonify({'error': 'state is required'}), 400
+
+            updated = db.update_alert_state(alert_id, new_state, author, reason)
+            if updated:
+                return jsonify({'status': 'updated', 'alert_id': alert_id, 'state': new_state})
+            else:
+                return jsonify({'error': 'Alert not found'}), 404
+
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        except Exception as e:
+            logger.error(f"Error updating alert state: {e}")
+            return jsonify({'error': 'Failed to update state', 'message': str(e)}), 500
+
+    @app.route('/api/suppressions', methods=['POST'])
+    @auth_decorator()
+    def create_suppression():
+        """Create a new alert suppression."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'Request body is required'}), 400
+
+            fingerprint = data.get('fingerprint')
+            scope = data.get('scope', 'global')
+            scope_value = data.get('scope_value')
+            author = data.get('author', 'api')
+            reason = data.get('reason', '')
+            duration_hours = data.get('duration_hours', 24)
+
+            if not fingerprint:
+                return jsonify({'error': 'fingerprint is required'}), 400
+            if scope not in ('global', 'host'):
+                return jsonify({'error': 'scope must be global or host'}), 400
+            if scope == 'host' and not scope_value:
+                return jsonify({'error': 'scope_value is required for host scope'}), 400
+            if not reason:
+                return jsonify({'error': 'reason is required'}), 400
+
+            sid = db.add_suppression(
+                fingerprint, scope, scope_value, author, reason, duration_hours
+            )
+            return jsonify({'status': 'created', 'suppression_id': sid})
+
+        except Exception as e:
+            logger.error(f"Error creating suppression: {e}")
+            return jsonify({'error': 'Failed to create suppression', 'message': str(e)}), 500
 
     return app
 

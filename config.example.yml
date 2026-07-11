@@ -30,10 +30,10 @@ logging:
 # REST API server configuration
 api:
   # Host to bind API server to
-  # 0.0.0.0 - Listen on all interfaces
-  # 127.0.0.1 - Listen only on localhost
-  # Default: 0.0.0.0
-  host: 0.0.0.0
+  # 127.0.0.1 - Listen only on localhost (recommended, default)
+  # 0.0.0.0 - Listen on all interfaces (use with reverse proxy + TLS)
+  # Default: 127.0.0.1
+  host: 127.0.0.1
 
   # Port for API server
   # Must be between 1 and 65535
@@ -44,3 +44,21 @@ api:
   # WARNING: Never enable in production!
   # Default: false
   debug: false
+
+# Log source scanning configuration
+scan:
+  # Allowed root directories for log file scanning.
+  # When set, the /api/scan endpoint only accepts paths within these roots.
+  # Symlinks are resolved before containment check.
+  # Empty list allows any path (less secure, use only for development).
+  # Default: [] (allow any)
+  # Example:
+  # allowed_roots:
+  #   - /var/log
+  #   - /opt/lotl/logs
+  #   - C:\Logs
+  allowed_roots: []
+
+  # Maximum file size in MB for individual log files
+  # Default: 100
+  max_file_size_mb: 100
