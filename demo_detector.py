@@ -149,6 +149,8 @@ def display_statistics(stats: Dict[str, int]):
 
     print(f"Events processed: {Colors.BOLD}{stats['events']}{Colors.RESET}")
     print(f"Alerts generated: {Colors.BOLD}{stats['alerts']}{Colors.RESET}")
+    if 'incidents' in stats:
+        print(f"Correlated incidents: {Colors.BOLD}{stats['incidents']}{Colors.RESET}")
 
     # Severity breakdown
     severity_counts = stats.get('by_severity', {})
@@ -258,6 +260,48 @@ def scan_logs(platform: str, log_path: str, engine: DetectionEngine,
     print_progress_end(f"Generated {Colors.BOLD}{len(alerts)}{Colors.RESET} alert(s)")
 
     return events, alerts
+
+
+def run_correlation(all_events: List[Event], rules_dir: str, db: AlertDatabase,
+                    platform: str = None) -> list:
+    """
+    Run lineage correlation over the collected events and persist incidents.
+
+    Returns the list of Incident objects (empty when no chain rules exist).
+    """
+    from core.correlator import ChainRuleLoader, Correlator
+
+    chains_dir = str(Path(rules_dir) / "correlation")
+    try:
+        chain_loader = ChainRuleLoader()
+        chains = chain_loader.load_chains_directory(chains_dir, platform=platform)
+    except Exception as e:
+        print_warning(f"Chain rules unavailable, correlation skipped: {e}")
+        return []
+
+    if not chains or not all_events:
+        return []
+
+    correlator = Correlator(chains)
+    incidents = correlator.correlate(all_events)
+
+    if incidents:
+        print_header("CORRELATED INCIDENTS")
+        for incident in incidents:
+            color = get_severity_color(incident.severity)
+            print(f"\n{color}[{incident.severity.upper()}]{Colors.RESET} "
+                  f"{Colors.BOLD}{incident.chain_name}{Colors.RESET} "
+                  f"({incident.chain_id}, score: {incident.score}, "
+                  f"risk: {incident.risk_band})")
+            for stage in incident.stages:
+                origin = "inferred parent" if stage['phantom'] else "observed event"
+                print(f"  {Colors.DIM}stage{Colors.RESET} {stage['stage']}: "
+                      f"{stage['process_name']} (pid {stage['pid']}, {origin})")
+            db.save_incident(incident)
+    else:
+        print_info("No correlated incidents detected")
+
+    return incidents
 
 
 def export_alerts(alerts: List[Dict[str, Any]], output_path: str, format: str):
@@ -372,6 +416,9 @@ def run_demo_mode(rules_dir: str, database: str, verbose: bool):
         if alert_id:
             saved_count += 1
 
+    # Correlate lineage chains across all collected events
+    incidents = run_correlation(all_events, rules_dir, db)
+
     # Display statistics
     by_severity = {}
     for alert in all_alerts:
@@ -380,6 +427,7 @@ def run_demo_mode(rules_dir: str, database: str, verbose: bool):
     stats = {
         'events': len(all_events),
         'alerts': len(all_alerts),
+        'incidents': len(incidents),
         'by_severity': by_severity,
         'database': database
     }
@@ -480,6 +528,10 @@ def run_scan_mode(platform: str, log_path: str, rules_dir: str,
         alert_id = db.save_alert(alert)
         if alert_id:
             saved_count += 1
+
+    # Correlate lineage chains across all collected events
+    correlation_platform = platform if platform != 'both' else None
+    run_correlation(all_events, rules_dir, db, platform=correlation_platform)
 
     # Export if requested
     if export and all_alerts:

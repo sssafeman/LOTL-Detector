@@ -165,6 +165,41 @@ class AlertDatabase:
             CREATE INDEX IF NOT EXISTS idx_audit_alert ON alert_audit(alert_id)
         """)
 
+        # Create incidents table (correlated chain matches)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS incidents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chain_id TEXT NOT NULL,
+                chain_name TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                host TEXT,
+                score INTEGER NOT NULL,
+                risk_band TEXT NOT NULL,
+                confidence INTEGER NOT NULL,
+                first_timestamp DATETIME,
+                last_timestamp DATETIME,
+                window_seconds INTEGER,
+                mitre_attack TEXT,
+                description TEXT,
+                response TEXT,
+                stages TEXT NOT NULL,
+                incident_fingerprint TEXT NOT NULL,
+                correlation_version INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_fingerprint
+            ON incidents(incident_fingerprint)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_incident_chain ON incidents(chain_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_incident_first_ts ON incidents(first_timestamp)
+        """)
+
         self.connection.commit()
         logger.debug("Database schema created/verified")
 
@@ -353,6 +388,119 @@ class AlertDatabase:
                 "is_suppressed": False,
                 "occurrence_count": 1,
             }
+
+    def save_incident(self, incident) -> Dict[str, Any]:
+        """
+        Store a correlated incident with fingerprint deduplication.
+
+        Rescanning the same log produces the same incident fingerprint,
+        in which case the existing row is returned unchanged.
+
+        Args:
+            incident: Incident object from core.correlator
+
+        Returns:
+            Dict with: incident_id, is_duplicate (bool)
+        """
+        from core.fingerprint import compute_incident_fingerprint
+
+        fingerprint = compute_incident_fingerprint(incident)
+        cursor = self.connection.cursor()
+
+        cursor.execute(
+            "SELECT id FROM incidents WHERE incident_fingerprint = ?",
+            (fingerprint,),
+        )
+        existing = cursor.fetchone()
+        if existing:
+            logger.info(
+                f"Incident deduplicated: ID={existing[0]}, chain={incident.chain_id}"
+            )
+            return {"incident_id": existing[0], "is_duplicate": True}
+
+        cursor.execute("""
+            INSERT INTO incidents (
+                chain_id, chain_name, severity, platform, host,
+                score, risk_band, confidence,
+                first_timestamp, last_timestamp, window_seconds,
+                mitre_attack, description, response, stages,
+                incident_fingerprint, correlation_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            incident.chain_id, incident.chain_name, incident.severity,
+            incident.platform, incident.host,
+            incident.score, incident.risk_band, incident.confidence,
+            incident.first_timestamp, incident.last_timestamp,
+            incident.window_seconds,
+            json.dumps(incident.mitre_attack) if incident.mitre_attack else '[]',
+            incident.description,
+            json.dumps(incident.response) if incident.response else '[]',
+            json.dumps(incident.stages),
+            fingerprint, incident.correlation_version,
+        ))
+        self.connection.commit()
+        incident_id = cursor.lastrowid
+        logger.info(
+            f"New incident saved: ID={incident_id}, chain={incident.chain_id}, "
+            f"score={incident.score}"
+        )
+        return {"incident_id": incident_id, "is_duplicate": False}
+
+    def get_incidents(
+        self,
+        chain_id: Optional[str] = None,
+        severity: Optional[str] = None,
+        platform: Optional[str] = None,
+        min_score: Optional[int] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Query stored incidents with optional filters, newest first.
+
+        Args:
+            chain_id: Filter by chain rule ID
+            severity: Filter by severity level
+            platform: Filter by platform
+            min_score: Minimum incident score
+            limit: Maximum number of results
+
+        Returns:
+            List of incident dictionaries with parsed JSON fields
+        """
+        query = "SELECT * FROM incidents WHERE 1=1"
+        params: List[Any] = []
+
+        if chain_id:
+            query += " AND chain_id = ?"
+            params.append(chain_id)
+        if severity:
+            query += " AND severity = ?"
+            params.append(severity)
+        if platform:
+            query += " AND platform = ?"
+            params.append(platform)
+        if min_score is not None:
+            query += " AND score >= ?"
+            params.append(min_score)
+
+        query += " ORDER BY first_timestamp DESC, id DESC LIMIT ?"
+        params.append(limit)
+
+        cursor = self.connection.cursor()
+        cursor.execute(query, params)
+
+        incidents = []
+        for row in cursor.fetchall():
+            record = dict(row)
+            for json_field in ("mitre_attack", "response", "stages"):
+                if record.get(json_field):
+                    record[json_field] = json.loads(record[json_field])
+            for ts_field in ("first_timestamp", "last_timestamp"):
+                value = record.get(ts_field)
+                if isinstance(value, datetime):
+                    record[ts_field] = value.isoformat()
+            incidents.append(record)
+        return incidents
 
     def _is_suppressed(
         self, fingerprint: str, activity_fingerprint: str, host: str

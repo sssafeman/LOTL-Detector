@@ -162,8 +162,13 @@ class RuleLoader:
         rules_dir = Path(rules_dir)
         rules = []
 
-        # Find all .yml and .yaml files
-        rule_files = list(rules_dir.glob('**/*.yml')) + list(rules_dir.glob('**/*.yaml'))
+        # Find all .yml and .yaml files. Chain rules live under a
+        # 'correlation' subdirectory with their own schema and loader.
+        rule_files = [
+            f for f in
+            list(rules_dir.glob('**/*.yml')) + list(rules_dir.glob('**/*.yaml'))
+            if 'correlation' not in f.parts
+        ]
 
         for rule_file in rule_files:
             try:

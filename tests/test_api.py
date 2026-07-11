@@ -288,6 +288,59 @@ def test_scan_linux_logs(client):
         assert 'alerts_generated' in data
 
 
+def test_scan_returns_incidents(client):
+    """Test that scan runs correlation and reports incidents"""
+    response = client.post('/api/scan', json={
+        'platform': 'windows',
+        'log_path': 'tests/fixtures/windows'
+    })
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert 'incidents_generated' in data
+    assert 'incident_results' in data
+    # The bundled Windows fixtures contain an Office to encoded
+    # PowerShell chain, so at least one incident must correlate.
+    assert data['incidents_generated'] >= 1
+    chain_ids = {r['chain_id'] for r in data['incident_results']}
+    assert 'CHAIN-WIN-001' in chain_ids
+
+    # Rescanning the same fixture must deduplicate, not duplicate
+    rescan = client.post('/api/scan', json={
+        'platform': 'windows',
+        'log_path': 'tests/fixtures/windows'
+    })
+    assert rescan.status_code == 200
+    assert rescan.get_json()['incidents_generated'] == 0
+
+
+def test_get_incidents_endpoint(client):
+    """Test incidents endpoint with filters"""
+    # Empty before any scan
+    response = client.get('/api/incidents')
+    assert response.status_code == 200
+    assert response.get_json()['count'] == 0
+
+    client.post('/api/scan', json={
+        'platform': 'windows',
+        'log_path': 'tests/fixtures/windows'
+    })
+
+    response = client.get('/api/incidents')
+    data = response.get_json()
+    assert data['count'] >= 1
+    incident = data['incidents'][0]
+    assert incident['chain_id'].startswith('CHAIN-')
+    assert isinstance(incident['stages'], list)
+    assert incident['risk_band'] in ('low', 'medium', 'high', 'critical')
+
+    filtered = client.get('/api/incidents?chain_id=CHAIN-LNX-001')
+    assert filtered.get_json()['count'] == 0
+
+    filtered = client.get('/api/incidents?min_score=999')
+    assert filtered.get_json()['count'] == 0
+
+
 def test_invalid_time_format(client):
     """Test alerts endpoint with invalid time format"""
     response = client.get('/api/alerts?start_time=invalid-date')

@@ -6,6 +6,8 @@ Cross-platform Living Off The Land (LOTL) detection framework for cybersecurity 
 
 LOTL Detector identifies suspicious use of legitimate system utilities commonly exploited by APT groups like Lazarus. The framework analyzes system logs to detect potentially malicious command execution patterns while minimizing false positives.
 
+Beyond single-event rules, a correlation layer builds per-host process trees and matches multi-stage behavior chains (for example, an Office application spawning encoded PowerShell) inside bounded time windows. Chain matches are emitted as incidents with full supporting events. See `docs/correlation.md` for the design.
+
 ### Supported Platforms
 - Windows (Sysmon, Event Logs)
 - Linux (auditd, syslog) 
@@ -508,6 +510,13 @@ Content-Type: application/json
   "platform": "linux",
   "log_path": "/var/log/audit/audit.log"
 }
+```
+
+The scan response includes `incidents_generated` and `incident_results` for correlated chain matches, alongside the per-alert results.
+
+#### Get Correlated Incidents
+```bash
+GET /api/incidents?chain_id=CHAIN-WIN-001&severity=critical&min_score=100&limit=50
 ```
 
 ### Example API Usage

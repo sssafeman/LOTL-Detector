@@ -1,0 +1,51 @@
+name: "Office Application Spawning Obfuscated PowerShell"
+id: "CHAIN-WIN-001"
+platform: windows
+severity: critical
+mitre_attack:
+  - T1566.001
+  - T1059.001
+  - T1027
+description: |
+  Detects an Office application (Word, Excel, PowerPoint, Outlook) spawning
+  PowerShell or cmd with an encoded, download, or expression-evaluation
+  payload. This lineage is the classic macro-based initial access chain:
+  a document lure executes a macro, which launches an obfuscated PowerShell
+  stager. Individually the parent and the command may look ambiguous, but
+  the combination across the process tree is high-confidence malicious.
+window_seconds: 300
+stages:
+  - name: "office_parent"
+    match:
+      process_name_any:
+        - "winword.exe"
+        - "excel.exe"
+        - "powerpnt.exe"
+        - "outlook.exe"
+        - "msaccess.exe"
+        - "mspub.exe"
+  - name: "obfuscated_shell_child"
+    relation: descendant
+    match:
+      process_name_any:
+        - "powershell.exe"
+        - "pwsh.exe"
+        - "cmd.exe"
+      command_contains_any:
+        - "-encodedcommand"
+        - "-enc "
+        - "frombase64string"
+        - "downloadstring"
+        - "downloadfile"
+        - "invoke-expression"
+        - "iex "
+        - "hidden"
+false_positives:
+  - "Document automation add-ins that legitimately invoke PowerShell."
+  - "IT self-service tooling launched from Outlook actionable messages."
+response:
+  - "Isolate the host and acquire the originating document."
+  - "Decode any Base64 payload and identify second-stage infrastructure."
+  - "Review the full process tree and outbound network connections."
+  - "Search the environment for the same document hash and sender."
+  - "Reset credentials for the affected user if execution succeeded."

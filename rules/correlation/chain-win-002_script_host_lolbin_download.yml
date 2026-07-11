@@ -1,0 +1,43 @@
+name: "Script Host Chain to LOLBin Downloader"
+id: "CHAIN-WIN-002"
+platform: windows
+severity: high
+mitre_attack:
+  - T1059.005
+  - T1218
+  - T1105
+description: |
+  Detects a Windows script host (wscript, cscript, mshta) spawning a
+  living-off-the-land binary commonly abused for payload retrieval
+  (certutil, bitsadmin, curl) with download arguments. This chain covers
+  shortcut, HTA, and script-based droppers that stage a second payload
+  through a trusted signed binary instead of touching disk directly.
+window_seconds: 300
+stages:
+  - name: "script_host_parent"
+    match:
+      process_name_any:
+        - "wscript.exe"
+        - "cscript.exe"
+        - "mshta.exe"
+  - name: "lolbin_downloader"
+    relation: descendant
+    match:
+      process_name_any:
+        - "certutil.exe"
+        - "bitsadmin.exe"
+        - "curl.exe"
+      command_contains_any:
+        - "urlcache"
+        - "-split"
+        - "/transfer"
+        - "http://"
+        - "https://"
+false_positives:
+  - "Login scripts that download configuration through certutil or curl."
+  - "Legacy software installers wrapped in wscript automation."
+response:
+  - "Capture the script file and any downloaded payload for analysis."
+  - "Block the remote URL and search proxy logs for other hosts."
+  - "Review scheduled tasks and startup folders for persistence."
+  - "Determine how the script reached the host (mail, share, USB)."

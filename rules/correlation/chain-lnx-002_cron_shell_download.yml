@@ -1,0 +1,46 @@
+name: "Cron Job Chain to Remote Payload Download"
+id: "CHAIN-LNX-002"
+platform: linux
+severity: high
+mitre_attack:
+  - T1053.003
+  - T1059.004
+  - T1105
+description: |
+  Detects cron executing a shell that downloads content from a remote
+  host. Attackers commonly persist through crontab entries that
+  periodically re-fetch and execute a payload, keeping the implant
+  fileless between beacons. Legitimate cron jobs rarely pull executables
+  from external infrastructure through a bare shell.
+window_seconds: 120
+stages:
+  - name: "cron_parent"
+    match:
+      process_name_any:
+        - "cron"
+        - "crond"
+        - "anacron"
+  - name: "cron_shell"
+    relation: descendant
+    match:
+      process_name_any:
+        - "sh"
+        - "bash"
+        - "dash"
+  - name: "remote_fetch"
+    relation: descendant
+    match:
+      process_name_any:
+        - "curl"
+        - "wget"
+      command_contains_any:
+        - "http://"
+        - "https://"
+false_positives:
+  - "Backup or certificate renewal jobs that fetch from external services."
+  - "Package mirror synchronization scheduled through cron."
+response:
+  - "Review all crontab entries and recently modified cron files."
+  - "Capture the downloaded content and block the remote host."
+  - "Check for identical cron entries across the server fleet."
+  - "Trace when the crontab entry was created and by which account."

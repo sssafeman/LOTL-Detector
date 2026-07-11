@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LOTL Chain Correlation Rule",
+  "type": "object",
+  "required": ["name", "id", "platform", "severity", "window_seconds", "stages"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Human-readable chain rule name"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^CHAIN-(WIN|LNX|MAC)-[0-9]{3}$",
+      "description": "Unique chain ID (CHAIN-WIN-001, CHAIN-LNX-001)"
+    },
+    "platform": {
+      "type": "string",
+      "enum": ["windows", "linux", "macos"],
+      "description": "Target operating system"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"],
+      "description": "Incident severity level"
+    },
+    "mitre_attack": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$"
+      },
+      "description": "MITRE ATT&CK technique IDs covered by the full chain"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed explanation of the behavior chain"
+    },
+    "window_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400,
+      "description": "Maximum seconds between the first and last observed stage"
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Ordered stages linked by process lineage",
+      "items": {
+        "type": "object",
+        "required": ["name", "match"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Stage label used in incident output"
+          },
+          "relation": {
+            "type": "string",
+            "enum": ["child", "descendant"],
+            "description": "Lineage relation to the previous stage's matched process (ignored on the first stage, default child)"
+          },
+          "match": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "process_name": {
+                "type": "string"
+              },
+              "process_name_any": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1
+              },
+              "command_contains": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1
+              },
+              "command_contains_any": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1
+              },
+              "command_regex": {
+                "type": "string"
+              },
+              "user_pattern": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "false_positives": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Known legitimate chains that resemble this one"
+    },
+    "response": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Recommended response actions"
+    }
+  }
+}

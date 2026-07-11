@@ -1,0 +1,60 @@
+name: "Web Server Spawning Shell With Payload Retrieval"
+id: "CHAIN-LNX-001"
+platform: linux
+severity: critical
+mitre_attack:
+  - T1190
+  - T1059.004
+  - T1105
+description: |
+  Detects a web server or application server process (nginx, apache,
+  php-fpm, tomcat, java, node) spawning a shell, which in turn runs a
+  download utility or scripting one-liner. This lineage indicates web
+  application exploitation followed by payload staging: a web shell or
+  injection vulnerability executes commands, then fetches tooling.
+window_seconds: 600
+stages:
+  - name: "web_server_parent"
+    match:
+      process_name_any:
+        - "nginx"
+        - "apache2"
+        - "httpd"
+        - "php-fpm"
+        - "tomcat"
+        - "java"
+        - "node"
+        - "gunicorn"
+        - "uwsgi"
+  - name: "spawned_shell"
+    relation: descendant
+    match:
+      process_name_any:
+        - "sh"
+        - "bash"
+        - "dash"
+  - name: "payload_retrieval"
+    relation: descendant
+    match:
+      process_name_any:
+        - "curl"
+        - "wget"
+        - "python"
+        - "python3"
+        - "nc"
+        - "ncat"
+      command_contains_any:
+        - "http://"
+        - "https://"
+        - "ftp://"
+        - "-c "
+        - "-e "
+false_positives:
+  - "Deployment hooks where the application server updates itself."
+  - "Health checks that shell out to curl against internal endpoints."
+response:
+  - "Identify the vulnerable endpoint from web access logs at the same time."
+  - "Capture the retrieved payload and block the remote infrastructure."
+  - "Audit the web root for dropped web shells and modified files."
+  - "Rotate application and database credentials reachable from the server."
+  - "Isolate the host if the payload executed."

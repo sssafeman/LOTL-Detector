@@ -155,3 +155,41 @@ def compute_fingerprint(alert: Alert) -> Dict[str, str]:
         "activity_fingerprint": activity_hash,
         "host": host,
     }
+
+
+def compute_incident_fingerprint(incident: Any) -> str:
+    """
+    Compute a stable SHA-256 fingerprint for a correlated incident.
+
+    Built from the chain ID, platform, host, and each matched stage's
+    normalized process name, pid, and timestamp. Rescanning the same log
+    yields the same fingerprint, so incidents deduplicate on rescan.
+
+    Args:
+        incident: An Incident object from core.correlator
+
+    Returns:
+        Hex-encoded SHA-256 fingerprint
+    """
+    stage_payload = []
+    for stage in incident.stages:
+        stage_payload.append({
+            "stage": stage.get("stage", ""),
+            "process_name": normalize_process_name(
+                stage.get("process_name", ""), incident.platform
+            ),
+            "pid": stage.get("pid"),
+            "timestamp": stage.get("timestamp"),
+        })
+
+    payload = {
+        "v": FINGERPRINT_VERSION,
+        "chain_id": incident.chain_id,
+        "platform": normalize_platform(incident.platform),
+        "host": normalize_text(incident.host).casefold(),
+        "stages": stage_payload,
+    }
+    payload_json = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(payload_json.encode("utf-8")).hexdigest()

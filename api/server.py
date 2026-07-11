@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 db = None
 rule_loader = None
 engine = None
+correlator = None
 collectors = {}
 
 
@@ -141,7 +142,7 @@ def create_app(config=None):
 
 def initialize_components(app):
     """Initialize database, rules, and collectors"""
-    global db, rule_loader, engine, collectors
+    global db, rule_loader, engine, correlator, collectors
 
     # Initialize database with WAL mode for concurrent access
     db = AlertDatabase(app.config['DATABASE_PATH'])
@@ -161,6 +162,19 @@ def initialize_components(app):
 
     # Initialize detection engine
     engine = DetectionEngine(rules)
+
+    # Load chain rules and initialize the correlation layer
+    from core.correlator import ChainRuleLoader, Correlator
+    from pathlib import Path as _Path
+    chains_dir = str(_Path(app.config['RULES_DIR']) / 'correlation')
+    try:
+        chain_loader = ChainRuleLoader()
+        chains = chain_loader.load_chains_directory(chains_dir)
+    except Exception as e:
+        logger.warning(f"Chain rules unavailable, correlation disabled: {e}")
+        chains = []
+    correlator = Correlator(chains)
+    logger.info(f"Loaded {len(chains)} chain rules")
 
     # Initialize collectors
     collectors['windows'] = WindowsCollector()
@@ -379,11 +393,29 @@ def register_routes(app, api_key=None):
             dup_count = sum(1 for r in results if r["is_duplicate"])
             supp_count = sum(1 for r in results if r.get("is_suppressed"))
 
+            # Run lineage correlation across the full event batch
+            incidents = correlator.correlate(events) if correlator else []
+            incident_results = []
+            for incident in incidents:
+                saved = db.save_incident(incident)
+                incident_results.append({
+                    **saved,
+                    'chain_id': incident.chain_id,
+                    'score': incident.score,
+                    'risk_band': incident.risk_band,
+                })
+            new_incidents = sum(
+                1 for r in incident_results if not r["is_duplicate"]
+            )
+            logger.info(f"Correlated {new_incidents} new incidents")
+
             return jsonify({
                 'events_processed': len(events),
                 'alerts_generated': new_count,
                 'duplicates_updated': dup_count,
                 'suppressed': supp_count,
+                'incidents_generated': new_incidents,
+                'incident_results': incident_results,
                 'results': results
             })
 
@@ -392,6 +424,35 @@ def register_routes(app, api_key=None):
         except Exception as e:
             logger.error(f"Error during scan: {e}")
             return jsonify({'error': 'Scan failed', 'message': str(e)}), 500
+
+    @app.route('/api/incidents', methods=['GET'])
+    @auth_decorator()
+    def get_incidents():
+        """
+        Get correlated incidents with optional filtering
+
+        Query parameters:
+        - chain_id: filter by chain rule ID
+        - severity: critical, high, medium, low
+        - platform: windows, linux, macos
+        - min_score: minimum incident score
+        - limit: maximum number of results (default 100)
+        """
+        try:
+            incidents = db.get_incidents(
+                chain_id=request.args.get('chain_id'),
+                severity=request.args.get('severity'),
+                platform=request.args.get('platform'),
+                min_score=request.args.get('min_score', type=int),
+                limit=request.args.get('limit', type=int, default=100),
+            )
+            return jsonify({
+                'count': len(incidents),
+                'incidents': incidents,
+            })
+        except Exception as e:
+            logger.error(f"Error fetching incidents: {e}")
+            return jsonify({'error': 'Failed to fetch incidents', 'message': str(e)}), 500
 
     @app.route('/api/alerts/<int:alert_id>/state', methods=['POST'])
     @auth_decorator()
