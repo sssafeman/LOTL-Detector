@@ -18,6 +18,7 @@ import jsonschema
 import yaml
 from dataclasses import dataclass, field
 from datetime import datetime
+from math import floor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -410,7 +411,8 @@ class Correlator:
 
         severity_sub = SEVERITY_SUBSCORES[chain.severity]
         raw = severity_sub * (0.25 + 0.75 * confidence / 100.0) * 1.5
-        score = max(0, min(150, round(raw)))
+        # Round half up like the alert scorer, not banker's rounding
+        score = max(0, min(150, floor(raw + 0.5)))
 
         return Incident(
             chain_id=chain.id,
