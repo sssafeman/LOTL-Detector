@@ -1,0 +1,28 @@
+name: "Curl or Wget Piped to Shell or Fetching Script"
+id: "MAC-002"
+platform: macos
+severity: high
+mitre_attack:
+  - T1105
+  - T1059.004
+description: |
+  Detects curl or wget retrieving a remote script or piping downloaded
+  content directly into a shell on macOS. This is the classic one-line
+  dropper used after initial access to stage a second payload without
+  writing a distinct tool to disk first.
+detection:
+  command_regex: '(?i)(curl|wget)\s+.*(https?://).*(\.sh(\s|$)|\|\s*(ba|z)?sh)'
+false_positives:
+  - "Developer bootstrap scripts fetched over HTTPS from a trusted host."
+  - "Package manager installers such as Homebrew run interactively by an admin."
+whitelist:
+  parent_processes:
+    - "Terminal"
+  users:
+    - "admin"
+  paths:
+    - "/opt/company/bootstrap/"
+response:
+  - "Capture the retrieved content and block the remote URL."
+  - "Determine how the command was launched (shell, osascript, agent)."
+  - "Check for follow-on persistence created shortly after the download."

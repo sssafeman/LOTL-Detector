@@ -11,7 +11,7 @@ Beyond single-event rules, a correlation layer builds per-host process trees and
 ### Supported Platforms
 - Windows (Sysmon, Event Logs)
 - Linux (auditd, syslog) 
-- macOS (Unified Logs) - Not yet implemented, planned for future release
+- macOS (Endpoint Security exec events via eslogger)
 
 ## Architecture
 
@@ -146,6 +146,7 @@ Data Flow:
 - `docs/ingestion.md`: bounded incremental ingestion with checkpoints
 - `docs/rule-packs.md`: signed rule packs, verification, staged activation
 - `docs/api-auth.md`: scoped API keys (read/scan/admin) and key rotation
+- `docs/macos-collector.md`: macOS Endpoint Security exec event collector
 - `docs/coverage-matrix.md`: rules mapped to MITRE ATT&CK and LOLBAS/GTFOBins
 - `docs/score-calibration.md`: v2 scoring validated against the fixture corpus
 - `docs/threat-model.md`: STRIDE threat model for the framework
@@ -610,16 +611,14 @@ print(f"Generated {result['alerts_generated']} alerts")
 - **Risk scoring:** 0-150 scale based on severity, detection criteria, and MITRE techniques
 - **Whitelisting:** Per-rule whitelists for users, parent processes, and paths
 - **MITRE ATT&CK mapping:** Each rule mapped to relevant tactics and techniques
-- **Cross-platform:** Unified event model across Windows and Linux
+- **Cross-platform:** Unified event model across Windows, Linux, and macOS
 
 ### Planned Expansions
 
-- macOS unified log support (not yet implemented)
 - Real-time agents using ETW (Windows) and eBPF (Linux)
+- Live Windows Event Log subscriptions and macOS Endpoint Security streaming
 - Machine learning-based anomaly detection
-- Process tree correlation
-- Advanced behavioral correlation across events
-- SIEM integration (CEF/syslog export)
+- Asymmetric rule pack signing for untrusted distribution
 
 ## License
 

@@ -288,6 +288,18 @@ def test_scan_linux_logs(client):
         assert 'alerts_generated' in data
 
 
+def test_scan_macos_ndjson(client):
+    """Scan endpoint accepts macOS eslogger NDJSON and generates alerts"""
+    response = client.post('/api/scan', json={
+        'platform': 'macos',
+        'log_path': 'tests/fixtures/macos/malicious_mac004_spctl_disable.ndjson'
+    })
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['events_processed'] == 1
+    assert data['alerts_generated'] >= 1
+
+
 def test_scan_returns_incidents(client):
     """Test that scan runs correlation and reports incidents"""
     response = client.post('/api/scan', json={
@@ -369,11 +381,23 @@ def test_ingest_incremental(client):
 
 
 def test_ingest_rejects_unknown_platform(client):
-    """Incremental ingest rejects platforms other than linux/windows"""
+    """Incremental ingest rejects platforms other than linux/windows/macos"""
     response = client.post('/api/ingest', json={
-        'platform': 'macos', 'log_path': 'tests/fixtures/linux'
+        'platform': 'freebsd', 'log_path': 'tests/fixtures/linux'
     })
     assert response.status_code == 400
+
+
+def test_ingest_macos_ndjson(client):
+    """Incremental ingest tails a macOS eslogger NDJSON source"""
+    response = client.post('/api/ingest', json={
+        'platform': 'macos',
+        'log_path': 'tests/fixtures/macos/malicious_mac004_spctl_disable.ndjson'
+    })
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['events_processed'] == 1
+    assert data['alerts_new'] == 1
 
 
 def test_ingest_windows_xml(client):

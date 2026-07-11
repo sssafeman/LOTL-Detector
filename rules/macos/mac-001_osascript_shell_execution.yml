@@ -1,0 +1,34 @@
+name: "Osascript Executing Shell Command"
+id: "MAC-001"
+platform: macos
+severity: high
+mitre_attack:
+  - T1059.002
+  - T1059.004
+description: |
+  Detects osascript invoking a shell through AppleScript's "do shell
+  script" primitive. Attackers use osascript to run shell payloads from
+  AppleScript or JXA, blending malicious execution into a signed Apple
+  binary. Legitimate automation exists, but shelling out to download or
+  execute remote content is a common initial access and execution pattern
+  on macOS.
+detection:
+  process_name: "osascript"
+  command_contains:
+    - "do shell script"
+false_positives:
+  - "Administrative AppleScript automation that intentionally runs shell commands."
+  - "Packaged apps that wrap privileged helper actions in do shell script."
+whitelist:
+  parent_processes:
+    - "munki"
+    - "jamf"
+  users:
+    - "_mbsetupuser"
+  paths:
+    - "/Library/Company/Automation/"
+response:
+  - "Capture the full AppleScript or JXA source and any downloaded payload."
+  - "Identify the parent application that launched osascript."
+  - "Review the user's login items and persistence locations."
+  - "Block any remote host contacted by the shell command."

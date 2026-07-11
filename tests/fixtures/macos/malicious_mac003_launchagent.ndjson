@@ -1,0 +1,1 @@
+{"time":"2026-07-11T10:34:00.100Z","process":{"executable":{"path":"/bin/zsh"},"ppid":700,"audit_token":{"pid":2220,"euid":501}},"event":{"exec":{"target":{"executable":{"path":"/bin/launchctl"}},"args":["launchctl","load","-w","/Users/victim/Library/LaunchAgents/com.apple.softwareupdate.plist"]}}}

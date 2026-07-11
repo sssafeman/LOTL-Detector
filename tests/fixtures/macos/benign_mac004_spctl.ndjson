@@ -1,0 +1,1 @@
+{"time":"2026-07-11T10:37:00.100Z","process":{"executable":{"path":"/bin/bash"},"ppid":800,"audit_token":{"pid":2231,"euid":501}},"event":{"exec":{"target":{"executable":{"path":"/usr/sbin/spctl"}},"args":["spctl","--status"]}}}

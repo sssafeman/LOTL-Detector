@@ -1,0 +1,27 @@
+name: "Gatekeeper Disabled via spctl"
+id: "MAC-004"
+platform: macos
+severity: critical
+mitre_attack:
+  - T1553.001
+description: |
+  Detects spctl disabling Gatekeeper assessment. Turning off Gatekeeper
+  lets unsigned or unnotarized code run without user prompts, a strong
+  precursor to executing downloaded malware. There is almost no legitimate
+  reason to globally disable Gatekeeper on a managed endpoint.
+detection:
+  process_name: "spctl"
+  command_contains:
+    - "--master-disable"
+false_positives:
+  - "A developer temporarily disabling Gatekeeper on a personal machine."
+whitelist:
+  users:
+    - "_developer"
+  paths:
+    - "/opt/company/dev-provisioning/"
+response:
+  - "Re-enable Gatekeeper with spctl --master-enable."
+  - "Identify what was executed while Gatekeeper was disabled."
+  - "Review recent quarantine events and downloaded applications."
+  - "Isolate the host if unsigned code executed."

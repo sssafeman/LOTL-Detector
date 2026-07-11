@@ -1,0 +1,35 @@
+name: "LaunchAgent or LaunchDaemon Persistence via launchctl"
+id: "MAC-003"
+platform: macos
+severity: high
+mitre_attack:
+  - T1543.001
+  - T1543.004
+description: |
+  Detects launchctl loading a property list from a LaunchAgents or
+  LaunchDaemons directory. Attackers persist on macOS by dropping a plist
+  that re-launches their payload at login or boot, then loading it with
+  launchctl. Legitimate software installs agents too, so parentage and
+  the plist origin matter.
+detection:
+  process_name: "launchctl"
+  command_contains_any:
+    - "LaunchAgents"
+    - "LaunchDaemons"
+  command_regex: '(?i)(load|bootstrap|enable).*/(LaunchAgents|LaunchDaemons)/.*\.plist'
+false_positives:
+  - "Legitimate application installers registering a login agent."
+  - "MDM tooling deploying managed LaunchDaemons."
+whitelist:
+  parent_processes:
+    - "installer"
+    - "jamf"
+  users:
+    - "root"
+  paths:
+    - "/Library/Company/Agents/"
+response:
+  - "Capture the referenced plist and the program it launches."
+  - "Determine when the plist was written and by which process."
+  - "Search the fleet for the same plist label or payload hash."
+  - "Remove the persistence and rotate affected credentials if needed."

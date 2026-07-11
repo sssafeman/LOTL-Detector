@@ -1,0 +1,1 @@
+{"time":"2026-07-11T10:38:00.100Z","process":{"executable":{"path":"/bin/bash"},"ppid":900,"audit_token":{"pid":2240,"euid":0}},"event":{"exec":{"target":{"executable":{"path":"/usr/bin/dscl"}},"args":["dscl",".","-create","/Users/backdoor","UserShell","/bin/bash"]}}}

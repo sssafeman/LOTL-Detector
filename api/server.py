@@ -15,6 +15,7 @@ from core.engine import DetectionEngine
 from core.config import get_config, get_database_path, get_rules_directory, get_logging_config
 from collectors.windows.collector import WindowsCollector
 from collectors.linux.collector import LinuxCollector
+from collectors.macos.collector import MacOSCollector
 from api.auth import load_api_key, require_scope, KeyStore
 import logging
 
@@ -188,6 +189,7 @@ def initialize_components(app):
     # Initialize collectors
     collectors['windows'] = WindowsCollector()
     collectors['linux'] = LinuxCollector()
+    collectors['macos'] = MacOSCollector()
     logger.info("Collectors initialized")
 
 
@@ -417,8 +419,8 @@ def register_routes(app, key_store=None):
             if not platform or not log_path:
                 return jsonify({'error': 'platform and log_path are required'}), 400
 
-            if platform not in ['windows', 'linux']:
-                return jsonify({'error': 'platform must be "windows" or "linux"'}), 400
+            if platform not in ['windows', 'linux', 'macos']:
+                return jsonify({'error': 'platform must be "windows", "linux", or "macos"'}), 400
 
             # Validate log source for path traversal and safety
             from core.source_validator import validate_log_source, SourceValidationError
@@ -544,9 +546,9 @@ def register_routes(app, key_store=None):
 
             if not platform or not log_path:
                 return jsonify({'error': 'platform and log_path are required'}), 400
-            if platform not in ('linux', 'windows'):
+            if platform not in ('linux', 'windows', 'macos'):
                 return jsonify({
-                    'error': 'incremental ingestion supports platform "linux" or "windows"'
+                    'error': 'incremental ingestion supports "linux", "windows", or "macos"'
                 }), 400
 
             from core.source_validator import validate_log_source, SourceValidationError
@@ -564,11 +566,14 @@ def register_routes(app, key_store=None):
 
             from core.ingest import (
                 IngestionService, linux_auditd_parser, windows_sysmon_parser,
+                macos_eslogger_parser,
             )
             if platform == 'linux':
                 parser = linux_auditd_parser(collectors['linux'])
-            else:
+            elif platform == 'windows':
                 parser = windows_sysmon_parser(collectors['windows'])
+            else:
+                parser = macos_eslogger_parser(collectors['macos'])
             service = IngestionService(
                 db, engine, parser, correlator=correlator, batch_size=batch_size
             )

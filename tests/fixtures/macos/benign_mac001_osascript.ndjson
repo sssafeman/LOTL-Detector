@@ -1,0 +1,1 @@
+{"time":"2026-07-11T10:31:00.100Z","process":{"executable":{"path":"/System/Applications/Automator.app/Contents/MacOS/Automator"},"ppid":1,"audit_token":{"pid":2202,"euid":501}},"event":{"exec":{"target":{"executable":{"path":"/usr/bin/osascript"}},"args":["osascript","-e","display dialog \"Backup complete\" buttons {\"OK\"}"]}}}

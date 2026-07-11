@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_EXTENSIONS = {
     "windows": {".log", ".xml", ".evtx", ".json"},
     "linux": {".log", ".json", ".txt"},
+    "macos": {".ndjson", ".json", ".log"},
 }
 
 # Default max file size: 100 MB

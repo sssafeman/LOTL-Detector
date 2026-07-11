@@ -1,0 +1,33 @@
+name: "Local Account Creation via dscl"
+id: "MAC-005"
+platform: macos
+severity: high
+mitre_attack:
+  - T1136.001
+description: |
+  Detects dscl creating a local user record. Attackers create hidden or
+  administrative accounts with dscl to establish durable access on macOS.
+  Legitimate provisioning uses dscl too, so account name, shell, and the
+  creating process are the signal.
+detection:
+  process_name: "dscl"
+  command_contains:
+    - "-create"
+  command_contains_any:
+    - "/Users/"
+    - "UserShell"
+    - "RealName"
+false_positives:
+  - "Provisioning workflows and MDM enrollment creating managed accounts."
+  - "Administrators scripting bulk user setup."
+whitelist:
+  parent_processes:
+    - "jamf"
+    - "munki"
+  paths:
+    - "/opt/company/provisioning/"
+response:
+  - "Review the created account name, shell, group membership, and UID."
+  - "Determine which process and user invoked dscl."
+  - "Check for a hidden account (IsHidden or UID below 500)."
+  - "Disable the account and investigate lateral movement."

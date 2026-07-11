@@ -2,7 +2,8 @@
 
 Maps every bundled rule to MITRE ATT&CK techniques and the LOLBAS
 (Windows) or GTFOBins (Linux) entry it detects abuse of. Generated
-against 22 atomic rules and 4 correlation chains.
+against 27 atomic rules (11 Windows, 11 Linux, 5 macOS) and 4
+correlation chains.
 
 Regenerate the inventory with:
 
@@ -44,6 +45,18 @@ python3 -c "from core.rule_loader import RuleLoader; \
 | LNX-010 | SSH Authorized Keys Modification | high | ssh authorized_keys | T1098.004 SSH Authorized Keys |
 | LNX-011 | Wget Download and Immediate Execution | high | wget | T1105 Ingress Tool Transfer, T1059.004 Unix Shell |
 
+## macOS Atomic Rules
+
+Sourced from Endpoint Security exec events (`eslogger exec`, macOS 11+).
+
+| Rule | Name | Severity | Abused Binary | ATT&CK Techniques |
+|------|------|----------|---------------|-------------------|
+| MAC-001 | Osascript Executing Shell Command | high | osascript | T1059.002 AppleScript, T1059.004 Unix Shell |
+| MAC-002 | Curl/Wget Piped to Shell or Fetching Script | high | curl, wget | T1105 Ingress Tool Transfer, T1059.004 Unix Shell |
+| MAC-003 | LaunchAgent/Daemon Persistence via launchctl | high | launchctl | T1543.001 Launch Agent, T1543.004 Launch Daemon |
+| MAC-004 | Gatekeeper Disabled via spctl | critical | spctl | T1553.001 Gatekeeper Bypass |
+| MAC-005 | Local Account Creation via dscl | high | dscl | T1136.001 Local Account |
+
 ## Correlation Chains
 
 Chains combine multiple techniques across process lineage. Their
@@ -83,7 +96,8 @@ candidate rules for future work:
 - T1055 Process Injection patterns.
 - T1546 Event Triggered Execution (WMI event subscriptions).
 - T1552 Unsecured Credentials beyond the SAM hive export.
-- macOS coverage is entirely absent (collectors are stubs).
+- macOS coverage is an initial set of 5 rules; TCC/keychain access
+  (T1555), and additional persistence surfaces are candidate additions.
 
 Correlation currently covers four chains. Additional high-signal chains
 worth adding: PowerShell to certutil/bitsadmin download, scheduled task

@@ -228,6 +228,18 @@ def windows_sysmon_parser(collector) -> EventParser:
     return parse
 
 
+def macos_eslogger_parser(collector) -> EventParser:
+    """
+    Build an Endpoint Security NDJSON parser backed by a MacOSCollector.
+
+    Records are single JSON lines, and read_new_text trims to complete
+    lines, so the whole complete-line buffer is consumed each run.
+    """
+    def parse(text: str):
+        return collector.events_from_text(text)
+    return parse
+
+
 class IngestionService:
     """
     Drives bounded, restart-safe ingestion of a log source.

@@ -14,12 +14,14 @@ from core.rule_loader import RuleLoader
 from core.engine import DetectionEngine
 from collectors.windows.collector import WindowsCollector
 from collectors.linux.collector import LinuxCollector
+from collectors.macos.collector import MacOSCollector
 
 
 # Test fixtures base path
 FIXTURES_DIR = Path("tests/fixtures")
 WINDOWS_FIXTURES = FIXTURES_DIR / "windows"
 LINUX_FIXTURES = FIXTURES_DIR / "linux"
+MACOS_FIXTURES = FIXTURES_DIR / "macos"
 
 
 class TestWindowsRuleIntegration:
@@ -602,31 +604,33 @@ class TestRuleLoadingIntegration:
     """Integration tests for rule loading and detection engine initialization"""
 
     def test_all_rules_load_successfully(self):
-        """Verify all 12 rules load without errors"""
+        """Verify the bundled rules load without errors"""
         loader = RuleLoader()
         rules = loader.load_rules_directory("rules")
 
-        assert len(rules) == 22, "Should load exactly 22 rules"
-
-        # Verify Windows rules
+        # Verify per-platform coverage
         windows_rules = [r for r in rules if r.platform == "windows"]
         assert len(windows_rules) == 11, "Should have 11 Windows rules"
 
-        # Verify Linux rules
         linux_rules = [r for r in rules if r.platform == "linux"]
         assert len(linux_rules) == 11, "Should have 11 Linux rules"
+
+        macos_rules = [r for r in rules if r.platform == "macos"]
+        assert len(macos_rules) == 5, "Should have 5 macOS rules"
 
         # Verify all expected rule IDs are present
         expected_rule_ids = [
             "WIN-001", "WIN-002", "WIN-003", "WIN-004", "WIN-005", "WIN-006",
             "WIN-007", "WIN-008", "WIN-009", "WIN-010", "WIN-011",
             "LNX-001", "LNX-002", "LNX-003", "LNX-004", "LNX-005", "LNX-006",
-            "LNX-007", "LNX-008", "LNX-009", "LNX-010", "LNX-011"
+            "LNX-007", "LNX-008", "LNX-009", "LNX-010", "LNX-011",
+            "MAC-001", "MAC-002", "MAC-003", "MAC-004", "MAC-005"
         ]
 
         loaded_rule_ids = [r.id for r in rules]
         for expected_id in expected_rule_ids:
             assert expected_id in loaded_rule_ids, f"Rule {expected_id} should be loaded"
+        assert len(rules) == len(expected_rule_ids), "Rule count drifted from expected set"
 
     def test_detection_engine_initializes_with_all_rules(self):
         """Verify detection engine initializes correctly with all rules"""
@@ -635,14 +639,16 @@ class TestRuleLoadingIntegration:
         engine = DetectionEngine(rules)
 
         # Engine should have all rules loaded
-        assert len(engine.rules) == 22, "Engine should have 12 rules"
+        assert len(engine.rules) == len(rules), "Engine should load every rule"
 
         # Verify engine can filter by platform
         windows_rules = [r for r in engine.rules if r.platform == "windows"]
         linux_rules = [r for r in engine.rules if r.platform == "linux"]
+        macos_rules = [r for r in engine.rules if r.platform == "macos"]
 
         assert len(windows_rules) == 11, "Should have 11 Windows rules in engine"
         assert len(linux_rules) == 11, "Should have 11 Linux rules in engine"
+        assert len(macos_rules) == 5, "Should have 5 macOS rules in engine"
 
     def test_all_windows_fixtures_parse_successfully(self):
         """Verify all Windows fixtures parse without errors"""
@@ -703,3 +709,73 @@ class TestRuleLoadingIntegration:
             events = collector.collect_events(str(fixture_path))
             assert len(events) == 1, f"{fixture} should parse exactly one event"
             assert events[0].platform == "linux", f"{fixture} event should be Linux platform"
+
+
+class TestMacOSRuleIntegration:
+    """Integration tests for macOS detection rules"""
+
+    @pytest.fixture
+    def macos_collector(self):
+        return MacOSCollector()
+
+    @pytest.fixture
+    def detection_engine(self):
+        rules = RuleLoader().load_rules_directory("rules")
+        return DetectionEngine(rules)
+
+    # (fixture, rule_id, expected severity, expected MITRE technique)
+    MALICIOUS_CASES = [
+        ("malicious_mac001_osascript_shell.ndjson", "MAC-001", "high", "T1059.002"),
+        ("malicious_mac002_curl_pipe_shell.ndjson", "MAC-002", "high", "T1105"),
+        ("malicious_mac003_launchagent.ndjson", "MAC-003", "high", "T1543.001"),
+        ("malicious_mac004_spctl_disable.ndjson", "MAC-004", "critical", "T1553.001"),
+        ("malicious_mac005_dscl_account.ndjson", "MAC-005", "high", "T1136.001"),
+    ]
+
+    BENIGN_CASES = [
+        ("benign_mac001_osascript.ndjson", "MAC-001"),
+        ("benign_mac002_curl.ndjson", "MAC-002"),
+        ("benign_mac003_launchctl.ndjson", "MAC-003"),
+        ("benign_mac004_spctl.ndjson", "MAC-004"),
+        ("benign_mac005_dscl.ndjson", "MAC-005"),
+    ]
+
+    @pytest.mark.parametrize(
+        "fixture,rule_id,severity,technique", MALICIOUS_CASES,
+        ids=[c[1] for c in MALICIOUS_CASES],
+    )
+    def test_malicious_fixture_triggers(
+        self, macos_collector, detection_engine, fixture, rule_id, severity, technique
+    ):
+        events = macos_collector.collect_events(str(MACOS_FIXTURES / fixture))
+        assert len(events) == 1, "Should parse exactly one event"
+        assert events[0].platform == "macos"
+
+        alerts = detection_engine.match_event(events[0])
+        alert = next((a for a in alerts if a.rule_id == rule_id), None)
+        assert alert is not None, f"Should trigger {rule_id}"
+        assert alert.severity == severity
+        assert technique in alert.mitre_attack
+        assert alert.score > 0
+
+    @pytest.mark.parametrize(
+        "fixture,rule_id", BENIGN_CASES, ids=[c[1] for c in BENIGN_CASES],
+    )
+    def test_benign_fixture_no_alert(
+        self, macos_collector, detection_engine, fixture, rule_id
+    ):
+        events = macos_collector.collect_events(str(MACOS_FIXTURES / fixture))
+        assert len(events) == 1
+        alerts = detection_engine.match_event(events[0])
+        assert not any(a.rule_id == rule_id for a in alerts), (
+            f"Benign fixture should not trigger {rule_id}"
+        )
+
+    def test_all_macos_fixtures_parse(self, macos_collector):
+        for fixture, _, _, _ in self.MALICIOUS_CASES:
+            events = macos_collector.collect_events(str(MACOS_FIXTURES / fixture))
+            assert len(events) == 1, f"{fixture} should parse exactly one event"
+            assert events[0].platform == "macos"
+        for fixture, _ in self.BENIGN_CASES:
+            events = macos_collector.collect_events(str(MACOS_FIXTURES / fixture))
+            assert len(events) == 1, f"{fixture} should parse exactly one event"

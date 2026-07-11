@@ -28,6 +28,7 @@ from core.scorer import Scorer
 from core.config import get_database_path, get_rules_directory
 from collectors.windows.collector import WindowsCollector
 from collectors.linux.collector import LinuxCollector
+from collectors.macos.collector import MacOSCollector
 from collectors.base import Event
 
 
@@ -226,6 +227,8 @@ def scan_logs(platform: str, log_path: str, engine: DetectionEngine,
         collector = WindowsCollector()
     elif platform == 'linux':
         collector = LinuxCollector()
+    elif platform == 'macos':
+        collector = MacOSCollector()
     else:
         raise ValueError(f"Unknown platform: {platform}")
 
@@ -376,6 +379,14 @@ def run_demo_mode(rules_dir: str, database: str, verbose: bool):
     if linux_fixtures.exists():
         for log_file in linux_fixtures.glob("*.log"):
             events, alerts = scan_logs('linux', str(log_file), engine, verbose)
+            all_events.extend(events)
+            all_alerts.extend(alerts)
+
+    # Scan macOS logs
+    macos_fixtures = fixtures_dir / "macos"
+    if macos_fixtures.exists():
+        for log_file in macos_fixtures.glob("*.ndjson"):
+            events, alerts = scan_logs('macos', str(log_file), engine, verbose)
             all_events.extend(events)
             all_alerts.extend(alerts)
 
@@ -624,7 +635,7 @@ Examples:
     # Scan options
     parser.add_argument(
         '--platform',
-        choices=['windows', 'linux', 'both'],
+        choices=['windows', 'linux', 'macos', 'both'],
         default='both',
         help='Platform to scan (default: both)'
     )

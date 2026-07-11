@@ -1,0 +1,1 @@
+{"time":"2026-07-11T10:33:00.100Z","process":{"executable":{"path":"/bin/bash"},"ppid":600,"audit_token":{"pid":2211,"euid":501}},"event":{"exec":{"target":{"executable":{"path":"/usr/bin/curl"}},"args":["curl","-s","https://api.example.com/v1/status.json"]}}}
