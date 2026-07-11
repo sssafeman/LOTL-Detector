@@ -10,10 +10,13 @@ Key generation: python -m api.auth generate
 """
 import os
 import hmac
+import json
 import secrets
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from functools import wraps
+from typing import Dict, FrozenSet, List, Optional
 from flask import request, jsonify, g
 
 logger = logging.getLogger(__name__)
@@ -21,6 +24,121 @@ logger = logging.getLogger(__name__)
 DEFAULT_KEY_DIR = Path.home() / ".config" / "lotl-detector"
 DEFAULT_KEY_FILE = DEFAULT_KEY_DIR / "api.key"
 MIN_KEY_LENGTH = 32
+
+# Access scopes, from least to most privileged. admin implies scan
+# implies read, so a key granted a scope also holds the ones below it.
+SCOPES = ("read", "scan", "admin")
+
+
+def expand_scopes(scopes) -> FrozenSet[str]:
+    """
+    Expand a set of granted scopes to include implied lower scopes.
+
+    admin grants everything; scan additionally grants read.
+    Unknown scope names are ignored.
+    """
+    granted = {s for s in scopes if s in SCOPES}
+    if "admin" in granted:
+        return frozenset(SCOPES)
+    if "scan" in granted:
+        granted.add("read")
+    return frozenset(granted)
+
+
+@dataclass(frozen=True)
+class KeyRecord:
+    """One API key with a label and its expanded scope set."""
+    token: str
+    label: str
+    scopes: FrozenSet[str]
+
+    def has_scope(self, scope: str) -> bool:
+        return scope in self.scopes
+
+
+class KeyStore:
+    """
+    Holds one or more API keys, each with scopes, for auth and rotation.
+
+    Multiple simultaneously valid keys are how rotation works: add the new
+    key alongside the old, migrate callers, then remove the old key. Lookup
+    compares a presented token against every key in constant time so a near
+    match cannot be found by timing.
+    """
+
+    def __init__(self, records: List[KeyRecord]):
+        self._records = list(records)
+
+    def __len__(self) -> int:
+        return len(self._records)
+
+    @property
+    def labels(self) -> List[str]:
+        return [r.label for r in self._records]
+
+    def authenticate(self, token: str) -> Optional[KeyRecord]:
+        """
+        Return the KeyRecord matching a token, or None.
+
+        Every record is compared (no early return) so total work does not
+        depend on which key, if any, matched.
+        """
+        token_bytes = token.encode()
+        matched: Optional[KeyRecord] = None
+        for record in self._records:
+            if hmac.compare_digest(token_bytes, record.token.encode()):
+                matched = record
+        return matched
+
+    @classmethod
+    def from_single(cls, key: str, scopes=SCOPES) -> "KeyStore":
+        """Build a store from one key (all scopes by default)."""
+        return cls([KeyRecord(key, "default", expand_scopes(scopes))])
+
+    @classmethod
+    def from_records(cls, records: List[Dict]) -> "KeyStore":
+        """
+        Build a store from a list of dicts:
+        [{"key": "...", "label": "...", "scopes": ["read", "scan"]}, ...]
+        """
+        parsed = []
+        for i, rec in enumerate(records):
+            key = (rec.get("key") or "").strip()
+            if not key or len(key) < MIN_KEY_LENGTH:
+                logger.warning(
+                    f"Skipping key #{i} ({rec.get('label', '?')}): "
+                    f"missing or shorter than {MIN_KEY_LENGTH} chars"
+                )
+                continue
+            label = rec.get("label", f"key-{i}")
+            scopes = expand_scopes(rec.get("scopes", ["read"]))
+            parsed.append(KeyRecord(key, label, scopes))
+        return cls(parsed)
+
+    @classmethod
+    def load(cls) -> Optional["KeyStore"]:
+        """
+        Load a KeyStore from the environment.
+
+        Precedence: LOTL_API_KEYS_FILE (JSON list of key records), then
+        LOTL_API_KEY (single key, all scopes). Returns None if neither is
+        set, matching the unauthenticated fallback.
+        """
+        keys_file = os.environ.get("LOTL_API_KEYS_FILE")
+        if keys_file:
+            try:
+                records = json.loads(Path(keys_file).read_text())
+                store = cls.from_records(records)
+                if len(store):
+                    return store
+                logger.error(f"No valid keys in {keys_file}")
+            except Exception as e:
+                logger.error(f"Failed to load keys file {keys_file}: {e}")
+
+        single = load_api_key()
+        if single:
+            return cls.from_single(single)
+        return None
 
 
 def load_api_key() -> str | None:
@@ -134,6 +252,46 @@ def require_auth(api_key: str):
     return decorator
 
 
+def _extract_bearer_token() -> Optional[str]:
+    """Return the bearer token from the Authorization header, or None."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header:
+        return None
+    parts = auth_header.split(" ", 1)
+    if len(parts) != 2 or parts[0] != "Bearer":
+        return None
+    token = parts[1].strip()
+    return token or None
+
+
+def require_scope(store: "KeyStore", scope: str):
+    """
+    Flask decorator requiring a valid key that holds the given scope.
+
+    A missing or unknown key returns 401. A valid key that lacks the scope
+    returns 403, so operators can tell "not authenticated" from "not
+    authorized". The authenticated key's label and scopes are placed on
+    Flask's g for downstream audit use.
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            token = _extract_bearer_token()
+            if not token:
+                return _unauthorized_response()
+            record = store.authenticate(token)
+            if record is None:
+                return _unauthorized_response()
+            if not record.has_scope(scope):
+                return _forbidden_response(scope)
+            g.authenticated = True
+            g.auth_label = record.label
+            g.auth_scopes = sorted(record.scopes)
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
 def _unauthorized_response():
     """Return a standard 401 response without revealing the failure reason."""
     response = jsonify({"error": "unauthorized"})
@@ -142,19 +300,65 @@ def _unauthorized_response():
     return response
 
 
+def _forbidden_response(scope: str):
+    """Return a 403 response naming the scope the key is missing."""
+    response = jsonify({
+        "error": "forbidden",
+        "message": f"this key lacks the required scope: {scope}",
+    })
+    response.status_code = 403
+    return response
+
+
+def generate_key_record(label: str, scopes: List[str]) -> Dict:
+    """
+    Generate a new key record dict for a keys file, without writing it.
+
+    Returns {"key", "label", "scopes"}. The caller decides where to store
+    it; the raw key is only returned, never logged.
+    """
+    return {
+        "key": secrets.token_urlsafe(32),
+        "label": label,
+        "scopes": [s for s in scopes if s in SCOPES] or ["read"],
+    }
+
+
 def main():
-    """CLI entry point for key generation: python -m api.auth generate"""
+    """
+    CLI for key management.
+
+      python -m api.auth generate
+          Write a single all-scope key to the default key file.
+
+      python -m api.auth record --label reader --scopes read scan
+          Print a JSON key record for a keys file (LOTL_API_KEYS_FILE).
+    """
     import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "generate":
+    argv = sys.argv[1:]
+    if argv and argv[0] == "generate":
         key = generate_api_key()
         print(f"API key generated and saved to {DEFAULT_KEY_FILE}")
         print(f"Key length: {len(key)} characters")
         print("Store this key securely. Use it in the Authorization header:")
-        print(f"  Authorization: Bearer <your-key>")
+        print("  Authorization: Bearer <your-key>")
         print()
         print("Or set the LOTL_API_KEY environment variable.")
+    elif argv and argv[0] == "record":
+        import argparse
+        parser = argparse.ArgumentParser(prog="api.auth record")
+        parser.add_argument("--label", required=True)
+        parser.add_argument(
+            "--scopes", nargs="+", default=["read"], choices=list(SCOPES)
+        )
+        args = parser.parse_args(argv[1:])
+        record = generate_key_record(args.label, args.scopes)
+        print(json.dumps([record], indent=2))
+        print()
+        print("Append this to your LOTL_API_KEYS_FILE (a JSON list of records).")
+        print("Rotate by adding a new record, migrating callers, then removing the old.")
     else:
-        print("Usage: python -m api.auth generate")
+        print("Usage: python -m api.auth generate | record --label L --scopes ...")
 
 
 if __name__ == "__main__":

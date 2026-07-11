@@ -145,6 +145,7 @@ Data Flow:
 - `docs/correlation.md`: process tree correlation and chain rules
 - `docs/ingestion.md`: bounded incremental ingestion with checkpoints
 - `docs/rule-packs.md`: signed rule packs, verification, staged activation
+- `docs/api-auth.md`: scoped API keys (read/scan/admin) and key rotation
 - `docs/coverage-matrix.md`: rules mapped to MITRE ATT&CK and LOLBAS/GTFOBins
 - `docs/score-calibration.md`: v2 scoring validated against the fixture corpus
 - `docs/threat-model.md`: STRIDE threat model for the framework

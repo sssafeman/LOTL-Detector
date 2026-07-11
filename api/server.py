@@ -15,7 +15,7 @@ from core.engine import DetectionEngine
 from core.config import get_config, get_database_path, get_rules_directory, get_logging_config
 from collectors.windows.collector import WindowsCollector
 from collectors.linux.collector import LinuxCollector
-from api.auth import load_api_key, require_auth
+from api.auth import load_api_key, require_scope, KeyStore
 import logging
 
 logger = logging.getLogger(__name__)
@@ -81,18 +81,27 @@ def create_app(config=None):
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    # Load API key for authentication
-    # Test config can inject API_KEY directly. Otherwise load from env/file.
-    api_key = app.config.get('API_KEY')
-    if not api_key and not app.config.get('TESTING'):
-        api_key = load_api_key()
+    # Build the API key store for authentication and scope enforcement.
+    # Precedence: an injected KeyStore (API_KEY_STORE), then a list of key
+    # records (API_KEYS), then a single key (API_KEY, all scopes), then
+    # environment loading. Tests may run without any key (unprotected).
+    key_store = app.config.get('API_KEY_STORE')
+    if key_store is None:
+        api_keys = app.config.get('API_KEYS')
+        api_key = app.config.get('API_KEY')
+        if api_keys:
+            key_store = KeyStore.from_records(api_keys)
+        elif api_key:
+            key_store = KeyStore.from_single(api_key)
+        elif not app.config.get('TESTING'):
+            key_store = KeyStore.load()
 
-    if not api_key and not app.config.get('TESTING'):
+    if key_store is None and not app.config.get('TESTING'):
         logger.error("No API key configured. Set LOTL_API_KEY env var or run: python -m api.auth generate")
         logger.error("Server starting without authentication. All endpoints are unprotected.")
-        app.config['API_KEY'] = None
-    else:
-        app.config['API_KEY'] = api_key
+    if key_store is not None:
+        logger.info(f"Authentication enabled with {len(key_store)} key(s): {key_store.labels}")
+    app.config['API_KEY_STORE'] = key_store
 
     # Configure CORS with restricted origins
     cors_origins = app.config.get('CORS_ORIGINS', [])
@@ -116,7 +125,7 @@ def create_app(config=None):
     initialize_components(app)
 
     # Register routes
-    register_routes(app, api_key)
+    register_routes(app, key_store)
 
     # Request logging (do not log command lines or request bodies)
     @app.before_request
@@ -182,8 +191,8 @@ def initialize_components(app):
     logger.info("Collectors initialized")
 
 
-def register_routes(app, api_key=None):
-    """Register all API routes with authentication"""
+def register_routes(app, key_store=None):
+    """Register all API routes with scope-aware authentication"""
 
     # Health check is the only unauthenticated endpoint
     @app.route('/api/health', methods=['GET'])
@@ -191,18 +200,24 @@ def register_routes(app, api_key=None):
         """Public health check endpoint. Returns minimal info."""
         return jsonify({'status': 'ok'})
 
-    # If no API key is configured (non-test), skip auth on all endpoints
-    # for backward compatibility during transition. In production, always set a key.
-    use_auth = api_key is not None
+    # When no key store is configured (tests, or explicitly unprotected),
+    # endpoints run without auth. Otherwise each endpoint requires a key
+    # holding the endpoint's scope: read for queries, scan for
+    # scan/ingest, admin for state changes and suppressions.
+    use_auth = key_store is not None
 
-    def auth_decorator():
-        """Return auth decorator if key is set, else passthrough."""
+    def scoped(scope):
+        """Return a scope-enforcing decorator, or passthrough if no auth."""
         if use_auth:
-            return require_auth(api_key)
-        # No-op decorator when auth is disabled
+            return require_scope(key_store, scope)
+
         def passthrough(f):
             return f
         return passthrough
+
+    def auth_decorator():
+        """Backward-compatible read-scope decorator."""
+        return scoped('read')
 
     @app.route('/api/alerts', methods=['GET'])
     @auth_decorator()
@@ -371,7 +386,7 @@ def register_routes(app, api_key=None):
             return jsonify({'error': 'Failed to fetch rules', 'message': str(e)}), 500
 
     @app.route('/api/scan', methods=['POST'])
-    @auth_decorator()
+    @scoped('scan')
     def scan_logs():
         """
         Scan log files for threats
@@ -505,7 +520,7 @@ def register_routes(app, api_key=None):
             return jsonify({'error': 'Failed to fetch incidents', 'message': str(e)}), 500
 
     @app.route('/api/ingest', methods=['POST'])
-    @auth_decorator()
+    @scoped('scan')
     def ingest_source():
         """
         Incrementally ingest new content from a line-oriented log source.
@@ -567,7 +582,7 @@ def register_routes(app, api_key=None):
             return jsonify({'error': 'Ingest failed', 'message': str(e)}), 500
 
     @app.route('/api/alerts/<int:alert_id>/state', methods=['POST'])
-    @auth_decorator()
+    @scoped('admin')
     def update_alert_state(alert_id):
         """Update an alert's lifecycle state."""
         try:
@@ -595,7 +610,7 @@ def register_routes(app, api_key=None):
             return jsonify({'error': 'Failed to update state', 'message': str(e)}), 500
 
     @app.route('/api/suppressions', methods=['POST'])
-    @auth_decorator()
+    @scoped('admin')
     def create_suppression():
         """Create a new alert suppression."""
         try:
