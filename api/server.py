@@ -504,6 +504,63 @@ def register_routes(app, api_key=None):
             logger.error(f"Error fetching incidents: {e}")
             return jsonify({'error': 'Failed to fetch incidents', 'message': str(e)}), 500
 
+    @app.route('/api/ingest', methods=['POST'])
+    @auth_decorator()
+    def ingest_source():
+        """
+        Incrementally ingest new content from a line-oriented log source.
+
+        Body: {"platform": "linux", "log_path": "/var/log/audit/audit.log",
+               "batch_size": 500 (optional)}
+
+        Only content appended since the last ingest of this source is
+        processed, tracked by a durable byte-offset checkpoint. Writes are
+        idempotent via alert and incident fingerprint dedup. Currently
+        supports linux auditd sources (file tailing).
+        """
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'Request body is required'}), 400
+
+            platform = data.get('platform')
+            log_path = data.get('log_path')
+            batch_size = data.get('batch_size', 500)
+
+            if not platform or not log_path:
+                return jsonify({'error': 'platform and log_path are required'}), 400
+            if platform != 'linux':
+                return jsonify({
+                    'error': 'incremental ingestion currently supports platform "linux"'
+                }), 400
+
+            from core.source_validator import validate_log_source, SourceValidationError
+            allowed_roots = app.config.get('ALLOWED_LOG_ROOTS', [])
+            max_size_mb = app.config.get('MAX_FILE_SIZE_MB', 100)
+            max_size_bytes = max_size_mb * 1024 * 1024 if max_size_mb else 100 * 1024 * 1024
+            try:
+                validated_path = validate_log_source(
+                    log_path, platform,
+                    allowed_roots=allowed_roots,
+                    max_file_size=max_size_bytes,
+                )
+            except SourceValidationError as e:
+                return jsonify({'error': f'Invalid log source: {e}'}), 400
+
+            from core.ingest import IngestionService, linux_auditd_parser
+            parser = linux_auditd_parser(collectors['linux'])
+            service = IngestionService(
+                db, engine, parser, correlator=correlator, batch_size=batch_size
+            )
+            summary = service.ingest_file(validated_path)
+            return jsonify(summary)
+
+        except ValueError as e:
+            return jsonify({'error': 'Invalid request', 'message': str(e)}), 400
+        except Exception as e:
+            logger.error(f"Error during ingest: {e}")
+            return jsonify({'error': 'Ingest failed', 'message': str(e)}), 500
+
     @app.route('/api/alerts/<int:alert_id>/state', methods=['POST'])
     @auth_decorator()
     def update_alert_state(alert_id):

@@ -143,6 +143,7 @@ Data Flow:
 - `docs/architecture.md`: system overview and data flow
 - `docs/rule-format.md`: atomic rule authoring
 - `docs/correlation.md`: process tree correlation and chain rules
+- `docs/ingestion.md`: bounded incremental ingestion with checkpoints
 - `docs/coverage-matrix.md`: rules mapped to MITRE ATT&CK and LOLBAS/GTFOBins
 - `docs/score-calibration.md`: v2 scoring validated against the fixture corpus
 - `docs/threat-model.md`: STRIDE threat model for the framework
@@ -524,6 +525,15 @@ Content-Type: application/json
 ```
 
 The scan response includes `incidents_generated` and `incident_results` for correlated chain matches, alongside the per-alert results.
+
+#### Incremental Ingest (file tailing)
+```bash
+POST /api/ingest
+Content-Type: application/json
+
+{"platform": "linux", "log_path": "/var/log/audit/audit.log", "batch_size": 500}
+```
+Processes only content appended since the last ingest of this source, tracked by a durable byte-offset checkpoint. Restart-safe and idempotent. See `docs/ingestion.md`.
 
 #### Get Correlated Incidents
 ```bash

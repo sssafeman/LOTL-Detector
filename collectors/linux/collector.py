@@ -90,40 +90,51 @@ class LinuxCollector(BaseCollector):
         Returns:
             List of Event objects
         """
-        events = []
-
-        # Read all lines and group by message ID
-        # EXECVE and SYSCALL records with the same msg ID belong together
-        records_by_msg_id = defaultdict(list)
-
         try:
             with open(file_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    # Only process EXECVE, SYSCALL, and CWD records
-                    if 'type=EXECVE' in line or 'type=SYSCALL' in line or 'type=CWD' in line:
-                        msg_id = get_audit_msg_id(line)
-                        if msg_id:
-                            records_by_msg_id[msg_id].append(line)
-
+                lines = f.readlines()
         except Exception as e:
             logger.error(f"Failed to read audit log {file_path}: {e}")
             raise
 
-        # Now process each message ID group
-        for msg_id, lines in records_by_msg_id.items():
+        events = self.events_from_lines(lines)
+        logger.debug(f"Parsed {len(events)} events from {file_path}")
+        return events
+
+    def events_from_lines(self, lines: List[str]) -> List[Event]:
+        """
+        Parse events from a list of raw audit log lines.
+
+        Groups EXECVE, SYSCALL, and CWD records by audit message ID and
+        assembles one Event per group. Shared by whole-file parsing and
+        by the incremental ingestion layer, which feeds it line buffers.
+
+        Args:
+            lines: Raw audit log lines (with or without trailing newlines)
+
+        Returns:
+            List of Event objects, one per complete record group
+        """
+        records_by_msg_id = defaultdict(list)
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            # Only process EXECVE, SYSCALL, and CWD records
+            if 'type=EXECVE' in line or 'type=SYSCALL' in line or 'type=CWD' in line:
+                msg_id = get_audit_msg_id(line)
+                if msg_id:
+                    records_by_msg_id[msg_id].append(line)
+
+        events = []
+        for msg_id, group in records_by_msg_id.items():
             try:
-                event = self._parse_record_group(msg_id, lines)
+                event = self._parse_record_group(msg_id, group)
                 if event:
                     events.append(event)
             except Exception as e:
                 logger.debug(f"Skipping record group {msg_id}: {e}")
                 continue
-
-        logger.debug(f"Parsed {len(events)} events from {file_path}")
         return events
 
     def _parse_record_group(self, msg_id: str, lines: List[str]) -> Optional[Event]:
