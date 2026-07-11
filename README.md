@@ -136,6 +136,16 @@ Data Flow:
 - [x] API server (Flask REST API)
 - [x] Dashboard UI (Web-based)
 - [x] CLI demonstration tool
+- [x] Process tree correlation with chain rules and incidents
+
+## Documentation
+
+- `docs/architecture.md`: system overview and data flow
+- `docs/rule-format.md`: atomic rule authoring
+- `docs/correlation.md`: process tree correlation and chain rules
+- `docs/coverage-matrix.md`: rules mapped to MITRE ATT&CK and LOLBAS/GTFOBins
+- `docs/threat-model.md`: STRIDE threat model for the framework
+- `docs/performance.md`: throughput and benchmarks
 
 ## Quick Start
 
