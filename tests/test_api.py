@@ -368,12 +368,24 @@ def test_ingest_incremental(client):
         os.unlink(path)
 
 
-def test_ingest_rejects_windows(client):
-    """Incremental ingest currently rejects non-linux platforms"""
+def test_ingest_rejects_unknown_platform(client):
+    """Incremental ingest rejects platforms other than linux/windows"""
     response = client.post('/api/ingest', json={
-        'platform': 'windows', 'log_path': 'tests/fixtures/windows'
+        'platform': 'macos', 'log_path': 'tests/fixtures/linux'
     })
     assert response.status_code == 400
+
+
+def test_ingest_windows_xml(client):
+    """Incremental ingest tails a Windows Sysmon XML source"""
+    response = client.post('/api/ingest', json={
+        'platform': 'windows',
+        'log_path': 'tests/fixtures/windows/malicious_win007_powershell_cradle.xml'
+    })
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['events_processed'] == 1
+    assert data['alerts_new'] == 1
 
 
 def test_export_alerts_json(client):

@@ -104,7 +104,7 @@ def read_new_text(path: str, checkpoint: Checkpoint) -> Dict[str, Any]:
         if last_nl == -1:
             # No complete line available yet.
             return {
-                "text": "", "new_offset": start,
+                "text": "", "start": start, "new_offset": start,
                 "inode": inode, "size": size, "reset": reset,
             }
         complete = raw[: last_nl + 1]
@@ -113,7 +113,7 @@ def read_new_text(path: str, checkpoint: Checkpoint) -> Dict[str, Any]:
 
     new_offset = start + len(complete.encode("utf-8"))
     return {
-        "text": complete, "new_offset": new_offset,
+        "text": complete, "start": start, "new_offset": new_offset,
         "inode": inode, "size": size, "reset": reset,
     }
 
@@ -181,14 +181,50 @@ class CheckpointStore:
         self.db.connection.commit()
 
 
-# A parser turns a complete-line text block into events.
-EventParser = Callable[[str], List[Event]]
+# A parser turns a text block into events. It may return either a plain
+# list of events (the whole text is consumed) or a (events, consumed_chars)
+# tuple, where consumed_chars marks how much of the text formed complete
+# records. Anything past consumed_chars is re-read on the next run, so
+# records that span a read boundary (multi-line XML elements) are never
+# split. See normalize_parse_result.
+EventParser = Callable[[str], Any]
+
+
+def normalize_parse_result(result, text: str):
+    """
+    Normalize a parser's return into (events, consumed_chars).
+
+    A bare list means the whole text was consumed. A tuple is returned
+    as-is. consumed_chars is clamped to len(text).
+    """
+    if isinstance(result, tuple):
+        events, consumed = result
+        return events, min(consumed, len(text))
+    return result, len(text)
 
 
 def linux_auditd_parser(collector) -> EventParser:
-    """Build an auditd text parser backed by a LinuxCollector."""
-    def parse(text: str) -> List[Event]:
-        return collector.events_from_lines(text.splitlines())
+    """
+    Build an auditd text parser backed by a LinuxCollector.
+
+    auditd records for one event are line-contiguous and written
+    atomically, and read_new_text already trims to complete lines, so the
+    whole complete-line buffer is consumed each run.
+    """
+    def parse(text: str):
+        return collector.events_from_lines(text.splitlines()), len(text)
+    return parse
+
+
+def windows_sysmon_parser(collector) -> EventParser:
+    """
+    Build a Sysmon XML text parser backed by a WindowsCollector.
+
+    Consumes only complete <Event>...</Event> elements; a trailing
+    partial element is left for the next run.
+    """
+    def parse(text: str):
+        return collector.events_from_text(text)
     return parse
 
 
@@ -196,10 +232,13 @@ class IngestionService:
     """
     Drives bounded, restart-safe ingestion of a log source.
 
-    Each run reads new complete-line content since the checkpoint, parses
-    it into events, processes them in bounded batches through the engine
-    and correlator, saves results with dedup, and advances the checkpoint
-    after each batch so a crash resumes at the last committed batch.
+    Each run reads new content since the checkpoint, parses it into events,
+    processes them in bounded batches through the engine and correlator,
+    saves results with dedup, and advances the checkpoint once to the
+    parser's consumed offset. A crash mid-run leaves the checkpoint
+    unadvanced, so the run is reprocessed and idempotent dedup absorbs the
+    overlap. The parser controls the consumed offset, so multi-line records
+    (XML elements) that span a read boundary are never split.
     """
 
     def __init__(
@@ -223,9 +262,9 @@ class IngestionService:
 
         Returns a summary dict with events processed, new alerts,
         duplicates, suppressions, new incidents, batch count, and the
-        final offset. Correlation runs per batch: chains split across
-        batch boundaries are not matched, which is the documented bound
-        of batched correlation.
+        start and end offsets. Correlation runs per batch: chains split
+        across batch boundaries are not matched, which is the documented
+        bound of batched correlation.
         """
         source = str(Path(source))
         checkpoint = self.checkpoints.load(source)
@@ -256,18 +295,24 @@ class IngestionService:
             summary["end_offset"] = checkpoint.offset
             return summary
 
-        events = self.parser(text)
+        events, consumed = normalize_parse_result(self.parser(text), text)
+        # The offset advances only past the consumed prefix, so a trailing
+        # partial record (a multi-line XML element still being written) is
+        # re-read on the next run instead of being split or dropped.
+        consumed_offset = read["start"] + len(text[:consumed].encode("utf-8"))
         summary["events_processed"] = len(events)
 
         for batch in chunked(events, self.batch_size):
             self._process_batch(batch, summary)
             summary["batches"] += 1
-            # Advance and persist the checkpoint after each committed batch.
             checkpoint.events_ingested += len(batch)
-            checkpoint.inode = read["inode"]
-            checkpoint.size = read["size"]
-            checkpoint.offset = read["new_offset"]
-            self.checkpoints.save(checkpoint)
+
+        # Persist the checkpoint once, advanced to the consumed offset.
+        # Idempotent dedup makes a boundary reprocess after a crash safe.
+        checkpoint.inode = read["inode"]
+        checkpoint.size = read["size"]
+        checkpoint.offset = consumed_offset
+        self.checkpoints.save(checkpoint)
 
         summary["end_offset"] = checkpoint.offset
         logger.info(

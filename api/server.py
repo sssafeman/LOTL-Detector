@@ -529,9 +529,9 @@ def register_routes(app, api_key=None):
 
             if not platform or not log_path:
                 return jsonify({'error': 'platform and log_path are required'}), 400
-            if platform != 'linux':
+            if platform not in ('linux', 'windows'):
                 return jsonify({
-                    'error': 'incremental ingestion currently supports platform "linux"'
+                    'error': 'incremental ingestion supports platform "linux" or "windows"'
                 }), 400
 
             from core.source_validator import validate_log_source, SourceValidationError
@@ -547,8 +547,13 @@ def register_routes(app, api_key=None):
             except SourceValidationError as e:
                 return jsonify({'error': f'Invalid log source: {e}'}), 400
 
-            from core.ingest import IngestionService, linux_auditd_parser
-            parser = linux_auditd_parser(collectors['linux'])
+            from core.ingest import (
+                IngestionService, linux_auditd_parser, windows_sysmon_parser,
+            )
+            if platform == 'linux':
+                parser = linux_auditd_parser(collectors['linux'])
+            else:
+                parser = windows_sysmon_parser(collectors['windows'])
             service = IngestionService(
                 db, engine, parser, correlator=correlator, batch_size=batch_size
             )

@@ -533,7 +533,7 @@ Content-Type: application/json
 
 {"platform": "linux", "log_path": "/var/log/audit/audit.log", "batch_size": 500}
 ```
-Processes only content appended since the last ingest of this source, tracked by a durable byte-offset checkpoint. Restart-safe and idempotent. See `docs/ingestion.md`.
+Supports `linux` auditd logs and `windows` Sysmon XML. Processes only content appended since the last ingest of this source, tracked by a durable byte-offset checkpoint. Restart-safe and idempotent, with correct multi-line XML element boundaries. See `docs/ingestion.md`.
 
 #### Get Correlated Incidents
 ```bash

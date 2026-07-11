@@ -170,6 +170,49 @@ class WindowsCollector(BaseCollector):
         logger.debug(f"Parsed {len(events)} events from {file_path}")
         return events
 
+    def events_from_text(self, text: str):
+        """
+        Parse events from a text buffer of concatenated Sysmon XML events.
+
+        Extracts each complete <Event>...</Event> element and parses it.
+        A trailing partial element (opened but not yet closed) is left
+        unconsumed so incremental ingestion re-reads it once complete.
+
+        Args:
+            text: Raw text containing zero or more Sysmon <Event> elements
+
+        Returns:
+            Tuple of (events, consumed_chars) where consumed_chars is the
+            character offset just past the last complete </Event>.
+        """
+        events = []
+        close_tag = "</Event>"
+        search_from = 0
+        consumed = 0
+
+        while True:
+            start = text.find("<Event", search_from)
+            if start == -1:
+                break
+            end = text.find(close_tag, start)
+            if end == -1:
+                # Incomplete trailing element: stop, leave it unconsumed.
+                break
+            end += len(close_tag)
+            element = text[start:end]
+            try:
+                event = self.parse_event(element)
+                if event:
+                    events.append(event)
+            except ValueError as e:
+                logger.debug(f"Skipping event: {e}")
+            except Exception as e:
+                logger.error(f"Error parsing event element: {e}")
+            consumed = end
+            search_from = end
+
+        return events, consumed
+
     def parse_event(self, raw_event: Any) -> Event:
         """
         Parse Sysmon Event ID 1 XML into Event object
