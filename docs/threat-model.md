@@ -33,8 +33,11 @@ hardening priorities.
 ### Spoofing
 
 - API request spoofing. Mitigated by bearer key auth with constant-time
-  comparison (`api/auth.py`) on every non-health endpoint. Residual: no
-  per-user identity or key rotation; a leaked key is fully privileged.
+  comparison (`api/auth.py`) on every non-health endpoint. Keys carry
+  scopes (read, scan, admin), so a leaked read key cannot trigger scans or
+  change state, and multiple keys can be valid at once for zero-downtime
+  rotation (`docs/api-auth.md`). Residual: no per-user identity or key
+  expiry; possession of a key still grants its scope.
 - Host identity spoofing in events. Correlation keys on host fields from
   `raw_data`. A host that forges its hostname could split or merge its
   own lineage. Impact is limited to that host's own events because
@@ -68,19 +71,21 @@ hardening priorities.
 ### Information Disclosure
 
 - Command lines contain sensitive data (credentials passed as
-  arguments, internal hostnames). The API returns them to any
-  authenticated caller. Request logging deliberately omits command lines
-  and request bodies (`api/server.py`). Residual: no field-level redaction
-  or role-based access.
+  arguments, internal hostnames). The API returns them to any caller with
+  the read scope. Request logging deliberately omits command lines and
+  request bodies (`api/server.py`). Residual: no field-level redaction;
+  scopes gate actions but any read key still sees full command lines.
 - Default binding is `127.0.0.1`. Debug mode is refused on non-loopback
   interfaces. CORS is closed by default and only opens to explicitly
   configured origins.
 
 ### Denial of Service
 
-- Large log files. Batch parsing loads full event lists into memory.
-  Mitigated partially by scan size limits; fully addressing this is the
-  bounded incremental ingestion work (MoA finding 16).
+- Large log files. Batch parsing (`/api/scan`) loads full event lists
+  into memory, bounded by scan size limits. The incremental ingestion
+  path (`/api/ingest`, finding 16) processes new content in bounded
+  batches with constant memory (benchmarked near 8 MB regardless of file
+  size), so it is the memory-safe path for large or growing sources.
 - Regex catastrophic backtracking. Rule regexes are attacker-adjacent
   (they run against attacker-influenced command lines). Patterns are
   precompiled at load time, which surfaces invalid patterns early but
@@ -101,19 +106,21 @@ hardening priorities.
 
 | Risk | Severity | Mitigation status |
 |------|----------|-------------------|
-| Leaked API key is fully privileged | High | Single shared key; add rotation and scopes |
-| No streaming ingestion, memory DoS on huge logs | Medium | Partial (size limits); finding 16 open |
+| Leaked API key grants its scope | Medium | Scoped keys + rotation done; no expiry, no per-user identity |
+| Memory DoS on huge logs | Low | Bounded incremental ingestion done (finding 16); batch path still loads fully |
 | Regex backtracking on hostile command lines | Medium | Precompiled; needs match timeout guard |
-| Command lines exposed to any authenticated caller | Medium | Log redaction done; API redaction open |
+| Command lines exposed to a read-scoped caller | Medium | Log redaction done; API redaction open |
 | Database integrity relies on OS permissions | Medium | Document deployment hardening |
+| Tampered rule distribution | Low | Signed rule packs done (finding 18); HMAC is symmetric, asymmetric is future work |
 | Author fields are self-asserted | Low | Acceptable for single-tenant portfolio scope |
 
 ## Assumptions
 
 - Single-tenant deployment behind a trusted network boundary or reverse
   proxy with TLS. The framework does not terminate TLS itself.
-- Rules are authored by trusted operators, validated in CI before
-  deployment. Untrusted rule distribution (signing, manifests) is future
-  work (MoA finding 18).
+- Rules are authored by trusted operators and validated in CI before
+  deployment. Rule packs are signed and verified before loading
+  (`docs/rule-packs.md`); the HMAC scheme assumes a trusted shared key,
+  and asymmetric signing for untrusted distribution is future work.
 - The host running the detector is trusted; local attackers with write
   access to the database or rules are out of scope.
