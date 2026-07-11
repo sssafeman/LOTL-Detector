@@ -271,6 +271,56 @@ def register_routes(app, api_key=None):
             logger.error(f"Error fetching alert {alert_id}: {e}")
             return jsonify({'error': 'Failed to fetch alert', 'message': str(e)}), 500
 
+    @app.route('/api/export', methods=['GET'])
+    @auth_decorator()
+    def export_records():
+        """
+        Export alerts or incidents in a SIEM format.
+
+        Query parameters:
+        - kind: 'alerts' (default) or 'incidents'
+        - format: 'cef' or 'json' (default 'json', ECS-aligned)
+        - severity, platform, min_score, limit: passed through to the query
+
+        Returns newline-delimited records (text/plain) so the response
+        streams directly into syslog or a file collector.
+        """
+        try:
+            from core.export import format_records
+
+            kind = request.args.get('kind', 'alerts')
+            fmt = request.args.get('format', 'json')
+            if fmt.lower() not in ('cef', 'json'):
+                return jsonify({'error': "format must be 'cef' or 'json'"}), 400
+            severity = request.args.get('severity')
+            platform = request.args.get('platform')
+            min_score = request.args.get('min_score', type=int)
+            limit = request.args.get('limit', type=int, default=1000)
+
+            if kind == 'incidents':
+                records = db.get_incidents(
+                    severity=severity, platform=platform,
+                    min_score=min_score, limit=limit,
+                )
+            else:
+                records = db.get_alerts(limit=limit)
+                if severity:
+                    records = [r for r in records if r.get('severity') == severity]
+                if platform:
+                    records = [r for r in records if r.get('platform') == platform]
+                if min_score is not None:
+                    records = [r for r in records if r.get('score', 0) >= min_score]
+
+            lines = format_records(records, fmt)
+            body = "\n".join(lines) + ("\n" if lines else "")
+            return app.response_class(body, mimetype='text/plain')
+
+        except ValueError as e:
+            return jsonify({'error': 'Invalid parameter', 'message': str(e)}), 400
+        except Exception as e:
+            logger.error(f"Error exporting records: {e}")
+            return jsonify({'error': 'Export failed', 'message': str(e)}), 500
+
     @app.route('/api/stats', methods=['GET'])
     @auth_decorator()
     def get_stats():

@@ -529,6 +529,14 @@ The scan response includes `incidents_generated` and `incident_results` for corr
 GET /api/incidents?chain_id=CHAIN-WIN-001&severity=critical&min_score=100&limit=50
 ```
 
+#### Export to SIEM
+```bash
+# ECS-aligned JSON lines (default) or CEF, for alerts or incidents
+GET /api/export?kind=alerts&format=json
+GET /api/export?kind=incidents&format=cef&severity=critical
+```
+Returns newline-delimited records as `text/plain`. Sinks (file, stdout, UDP syslog, HTTP webhook with retries) are available programmatically via `core.export`.
+
 ### Example API Usage
 
 ```python

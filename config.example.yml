@@ -62,3 +62,28 @@ scan:
   # Maximum file size in MB for individual log files
   # Default: 100
   max_file_size_mb: 100
+
+# SIEM export configuration
+# Formats: cef (ArcSight Common Event Format) or json (ECS-aligned).
+# Sinks deliver formatted alerts and incidents to downstream systems.
+# The /api/export endpoint uses these formats on demand; the sink list
+# below documents the shapes accepted by core.export.build_sink.
+export:
+  # Default format for the /api/export endpoint when none is requested.
+  # Default: json
+  default_format: json
+
+  # Optional standing sinks (used by tooling, not the on-demand endpoint).
+  # sinks:
+  #   - type: file
+  #     path: /var/log/lotl/export.log
+  #   - type: syslog
+  #     host: 127.0.0.1
+  #     port: 514
+  #     facility: 13
+  #     severity: 5
+  #   - type: webhook
+  #     url: https://siem.example.com/ingest
+  #     max_retries: 3
+  #     backoff_seconds: 0.5
+  sinks: []

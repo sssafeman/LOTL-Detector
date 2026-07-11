@@ -341,6 +341,40 @@ def test_get_incidents_endpoint(client):
     assert filtered.get_json()['count'] == 0
 
 
+def test_export_alerts_json(client):
+    """Export alerts as ECS JSON lines"""
+    client.post('/api/scan', json={
+        'platform': 'windows', 'log_path': 'tests/fixtures/windows'
+    })
+    response = client.get('/api/export?kind=alerts&format=json')
+    assert response.status_code == 200
+    assert response.mimetype == 'text/plain'
+    body = response.get_data(as_text=True).strip()
+    if body:
+        import json as _json
+        first = _json.loads(body.splitlines()[0])
+        assert 'rule' in first
+        assert first['observer']['vendor'] == 'LOTL Detector'
+
+
+def test_export_incidents_cef(client):
+    """Export incidents as CEF lines"""
+    client.post('/api/scan', json={
+        'platform': 'windows', 'log_path': 'tests/fixtures/windows'
+    })
+    response = client.get('/api/export?kind=incidents&format=cef')
+    assert response.status_code == 200
+    body = response.get_data(as_text=True).strip()
+    if body:
+        assert body.splitlines()[0].startswith('CEF:0|LOTL Detector|')
+
+
+def test_export_invalid_format(client):
+    """Unknown export format returns 400"""
+    response = client.get('/api/export?format=leef')
+    assert response.status_code == 400
+
+
 def test_invalid_time_format(client):
     """Test alerts endpoint with invalid time format"""
     response = client.get('/api/alerts?start_time=invalid-date')
