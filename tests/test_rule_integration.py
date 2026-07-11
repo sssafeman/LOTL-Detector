@@ -616,7 +616,7 @@ class TestRuleLoadingIntegration:
         assert len(linux_rules) == 11, "Should have 11 Linux rules"
 
         macos_rules = [r for r in rules if r.platform == "macos"]
-        assert len(macos_rules) == 5, "Should have 5 macOS rules"
+        assert len(macos_rules) == 7, "Should have 7 macOS rules"
 
         # Verify all expected rule IDs are present
         expected_rule_ids = [
@@ -624,7 +624,8 @@ class TestRuleLoadingIntegration:
             "WIN-007", "WIN-008", "WIN-009", "WIN-010", "WIN-011",
             "LNX-001", "LNX-002", "LNX-003", "LNX-004", "LNX-005", "LNX-006",
             "LNX-007", "LNX-008", "LNX-009", "LNX-010", "LNX-011",
-            "MAC-001", "MAC-002", "MAC-003", "MAC-004", "MAC-005"
+            "MAC-001", "MAC-002", "MAC-003", "MAC-004", "MAC-005",
+            "MAC-006", "MAC-007"
         ]
 
         loaded_rule_ids = [r.id for r in rules]
@@ -648,7 +649,7 @@ class TestRuleLoadingIntegration:
 
         assert len(windows_rules) == 11, "Should have 11 Windows rules in engine"
         assert len(linux_rules) == 11, "Should have 11 Linux rules in engine"
-        assert len(macos_rules) == 5, "Should have 5 macOS rules in engine"
+        assert len(macos_rules) == 7, "Should have 7 macOS rules in engine"
 
     def test_all_windows_fixtures_parse_successfully(self):
         """Verify all Windows fixtures parse without errors"""
@@ -730,6 +731,8 @@ class TestMacOSRuleIntegration:
         ("malicious_mac003_launchagent.ndjson", "MAC-003", "high", "T1543.001"),
         ("malicious_mac004_spctl_disable.ndjson", "MAC-004", "critical", "T1553.001"),
         ("malicious_mac005_dscl_account.ndjson", "MAC-005", "high", "T1136.001"),
+        ("malicious_mac006_keychain_dump.ndjson", "MAC-006", "critical", "T1555.001"),
+        ("malicious_mac007_sudoers.ndjson", "MAC-007", "high", "T1548.003"),
     ]
 
     BENIGN_CASES = [
@@ -738,6 +741,8 @@ class TestMacOSRuleIntegration:
         ("benign_mac003_launchctl.ndjson", "MAC-003"),
         ("benign_mac004_spctl.ndjson", "MAC-004"),
         ("benign_mac005_dscl.ndjson", "MAC-005"),
+        ("benign_mac006_security.ndjson", "MAC-006"),
+        ("benign_mac007_sudoers_read.ndjson", "MAC-007"),
     ]
 
     @pytest.mark.parametrize(

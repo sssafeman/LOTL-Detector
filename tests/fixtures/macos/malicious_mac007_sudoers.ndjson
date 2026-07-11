@@ -1,0 +1,1 @@
+{"time":"2026-07-11T10:42:00.100Z","process":{"executable":{"path":"/bin/zsh"},"ppid":1100,"audit_token":{"pid":2260,"euid":0}},"event":{"exec":{"target":{"executable":{"path":"/usr/bin/tee"}},"args":["tee","-a","/etc/sudoers.d/backdoor"]}}}

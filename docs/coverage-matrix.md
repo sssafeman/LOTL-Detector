@@ -2,7 +2,7 @@
 
 Maps every bundled rule to MITRE ATT&CK techniques and the LOLBAS
 (Windows) or GTFOBins (Linux) entry it detects abuse of. Generated
-against 27 atomic rules (11 Windows, 11 Linux, 5 macOS) and 5
+against 29 atomic rules (11 Windows, 11 Linux, 7 macOS) and 5
 correlation chains.
 
 Regenerate the inventory with:
@@ -56,6 +56,8 @@ Sourced from Endpoint Security exec events (`eslogger exec`, macOS 11+).
 | MAC-003 | LaunchAgent/Daemon Persistence via launchctl | high | launchctl | T1543.001 Launch Agent, T1543.004 Launch Daemon |
 | MAC-004 | Gatekeeper Disabled via spctl | critical | spctl | T1553.001 Gatekeeper Bypass |
 | MAC-005 | Local Account Creation via dscl | high | dscl | T1136.001 Local Account |
+| MAC-006 | Keychain Credential Access via security | critical | security | T1555.001 Keychain |
+| MAC-007 | Sudoers Modification for Persistence | high | tee, cp, sed | T1548.003 Sudo and Sudo Caching |
 
 ## Correlation Chains
 
@@ -79,10 +81,10 @@ several tactics in the wild; this lists the tactic each rule targets.
 |--------|--------------------|-------|
 | Initial Access | T1190, T1566.001 | CHAIN-LNX-001, CHAIN-WIN-001 |
 | Execution | T1059.001, T1059.004, T1059.005, T1059.006, T1047 | WIN-002, WIN-003, WIN-007, LNX-001, LNX-002, LNX-005, LNX-006, LNX-007, LNX-011, chains |
-| Persistence | T1053.003, T1543.002, T1098.004, T1197 | LNX-003, LNX-008, LNX-010, WIN-005, CHAIN-LNX-002 |
-| Privilege Escalation | T1574.006 | LNX-009 |
-| Defense Evasion | T1027, T1140, T1218.003, T1218.005, T1218.007, T1218.010, T1218.011 | WIN-001, WIN-002, WIN-004, WIN-006, WIN-008, WIN-010, WIN-011, LNX-005 |
-| Credential Access | T1003.002 | WIN-009 |
+| Persistence | T1053.003, T1543.001, T1543.002, T1543.004, T1098.004, T1136.001, T1197 | LNX-003, LNX-008, LNX-010, WIN-005, MAC-003, MAC-005, CHAIN-LNX-002 |
+| Privilege Escalation | T1574.006, T1548.003 | LNX-009, MAC-007 |
+| Defense Evasion | T1027, T1140, T1218.003, T1218.005, T1218.007, T1218.010, T1218.011, T1553.001 | WIN-001, WIN-002, WIN-004, WIN-006, WIN-008, WIN-010, WIN-011, LNX-005, MAC-004 |
+| Credential Access | T1003.002, T1555.001 | WIN-009, MAC-006 |
 | Lateral Movement | T1021, T1021.004 | WIN-003, LNX-004 |
 | Command and Control | T1071, T1071.001, T1105, T1572 | WIN-001, WIN-005, WIN-007, WIN-010, LNX-001, LNX-002, LNX-004, LNX-006, LNX-011, chains |
 
@@ -97,8 +99,9 @@ candidate rules for future work:
 - T1055 Process Injection patterns.
 - T1546 Event Triggered Execution (WMI event subscriptions).
 - T1552 Unsecured Credentials beyond the SAM hive export.
-- macOS coverage is an initial set of 5 rules; TCC/keychain access
-  (T1555), and additional persistence surfaces are candidate additions.
+- macOS coverage is 7 rules across execution, persistence, privilege
+  escalation, defense evasion, and credential access; TCC database access
+  and login-item plist tampering are candidate additions.
 
 Correlation currently covers four chains. Additional high-signal chains
 worth adding: PowerShell to certutil/bitsadmin download, scheduled task

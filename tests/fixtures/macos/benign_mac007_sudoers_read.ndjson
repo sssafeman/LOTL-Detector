@@ -1,0 +1,1 @@
+{"time":"2026-07-11T10:43:00.100Z","process":{"executable":{"path":"/bin/zsh"},"ppid":1100,"audit_token":{"pid":2261,"euid":0}},"event":{"exec":{"target":{"executable":{"path":"/bin/cat"}},"args":["cat","/etc/sudoers"]}}}

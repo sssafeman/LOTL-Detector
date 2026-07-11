@@ -54,11 +54,13 @@ Use it via `POST /api/ingest` with `"platform": "macos"`, or the library
 
 ## Rules
 
-Five macOS detection rules ship with the collector (see
+Seven macOS detection rules ship with the collector (see
 `docs/coverage-matrix.md`): osascript shell execution, curl/wget download
 to shell, LaunchAgent/Daemon persistence via launchctl, Gatekeeper
-disable via spctl, and local account creation via dscl. Each has malicious
-and benign fixtures and integration tests.
+disable via spctl, local account creation via dscl, keychain credential
+access via security, and sudoers modification. A correlation chain
+(CHAIN-MAC-001) links osascript to a shell to a network download. Each
+rule has malicious and benign fixtures and integration tests.
 
 ## Limitations
 

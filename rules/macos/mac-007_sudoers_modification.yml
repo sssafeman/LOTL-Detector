@@ -1,0 +1,31 @@
+name: "Sudoers Modification for Privilege Persistence"
+id: "MAC-007"
+platform: macos
+severity: high
+mitre_attack:
+  - T1548.003
+description: |
+  Detects a write to /etc/sudoers or /etc/sudoers.d through a shell
+  utility. Attackers grant themselves passwordless sudo by appending a
+  rule to sudoers, establishing durable privilege escalation. Legitimate
+  changes use visudo interactively; scripted writes via tee, cp, or
+  redirection are the suspicious pattern.
+detection:
+  command_contains_any:
+    - "/etc/sudoers"
+  command_regex: '(?i)(tee|cp|mv|install|dd|printf|echo|sed)\s+.*/etc/sudoers(\.d)?'
+false_positives:
+  - "Configuration management (Ansible, Jamf) deploying managed sudo rules."
+  - "Provisioning scripts that install a vetted sudoers drop-in."
+whitelist:
+  parent_processes:
+    - "jamf"
+    - "ansible-playbook"
+    - "munki"
+  paths:
+    - "/opt/company/provisioning/"
+response:
+  - "Capture the exact sudoers rule that was written and by whom."
+  - "Revert unauthorized changes and validate with visudo -c."
+  - "Review sudo logs for commands run under the new rule."
+  - "Rotate credentials and investigate how the account gained write access."

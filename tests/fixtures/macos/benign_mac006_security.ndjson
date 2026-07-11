@@ -1,0 +1,1 @@
+{"time":"2026-07-11T10:41:00.100Z","process":{"executable":{"path":"/bin/bash"},"ppid":1000,"audit_token":{"pid":2251,"euid":501}},"event":{"exec":{"target":{"executable":{"path":"/usr/bin/security"}},"args":["security","list-keychains"]}}}
