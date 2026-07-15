@@ -1,24 +1,221 @@
-"""
-Database module for persistent alert storage
-"""
-import sqlite3
+"""Database module for persistent alert storage."""
+
 import json
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from pathlib import Path
-from core.engine import Alert
 import logging
+import sqlite3
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+from core.engine import Alert
+
+if TYPE_CHECKING:
+    from core.correlator import Incident
 
 logger = logging.getLogger(__name__)
 
 
+_CREATE_ALERTS_TABLE = """
+    CREATE TABLE IF NOT EXISTS alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rule_id TEXT NOT NULL,
+        rule_name TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        score INTEGER NOT NULL,
+        platform TEXT NOT NULL,
+        process_name TEXT NOT NULL,
+        command_line TEXT NOT NULL,
+        user TEXT NOT NULL,
+        parent_process_name TEXT,
+        timestamp DATETIME NOT NULL,
+        mitre_attack TEXT,
+        description TEXT,
+        response TEXT,
+        event_data TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+"""
+
+_ALERT_INDEX_STATEMENTS = (
+    "CREATE INDEX IF NOT EXISTS idx_timestamp ON alerts(timestamp)",
+    "CREATE INDEX IF NOT EXISTS idx_severity ON alerts(severity)",
+    "CREATE INDEX IF NOT EXISTS idx_score ON alerts(score)",
+    "CREATE INDEX IF NOT EXISTS idx_platform ON alerts(platform)",
+    "CREATE INDEX IF NOT EXISTS idx_fingerprint ON alerts(fingerprint)",
+    "CREATE INDEX IF NOT EXISTS idx_state ON alerts(state)",
+)
+
+_SUPPRESSION_SCHEMA_STATEMENTS = (
+    """
+        CREATE TABLE IF NOT EXISTS suppressions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fingerprint TEXT NOT NULL,
+            fingerprint_version INTEGER NOT NULL DEFAULT 1,
+            scope TEXT NOT NULL
+                CHECK (scope IN ('global', 'host')),
+            scope_value TEXT,
+            author TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            starts_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1
+                CHECK (active IN (0, 1)),
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            revoked_at DATETIME,
+            revoked_by TEXT,
+            revoke_reason TEXT,
+            CHECK (
+                (scope = 'global' AND scope_value IS NULL)
+                OR
+                (scope = 'host' AND scope_value IS NOT NULL)
+            ),
+            CHECK (expires_at > starts_at)
+        )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_supp_fingerprint ON suppressions(fingerprint)",
+    "CREATE INDEX IF NOT EXISTS idx_supp_active ON suppressions(active)",
+)
+
+_AUDIT_SCHEMA_STATEMENTS = (
+    """
+        CREATE TABLE IF NOT EXISTS alert_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            previous_state TEXT,
+            new_state TEXT,
+            author TEXT NOT NULL,
+            reason TEXT,
+            timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (alert_id) REFERENCES alerts(id)
+        )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_audit_alert ON alert_audit(alert_id)",
+)
+
+_INCIDENT_SCHEMA_STATEMENTS = (
+    """
+        CREATE TABLE IF NOT EXISTS incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chain_id TEXT NOT NULL,
+            chain_name TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            host TEXT,
+            score INTEGER NOT NULL,
+            risk_band TEXT NOT NULL,
+            confidence INTEGER NOT NULL,
+            first_timestamp DATETIME,
+            last_timestamp DATETIME,
+            window_seconds INTEGER,
+            mitre_attack TEXT,
+            description TEXT,
+            response TEXT,
+            stages TEXT NOT NULL,
+            incident_fingerprint TEXT NOT NULL,
+            correlation_version INTEGER NOT NULL DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """,
+    """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_fingerprint
+        ON incidents(incident_fingerprint)
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_incident_chain ON incidents(chain_id)",
+    "CREATE INDEX IF NOT EXISTS idx_incident_first_ts ON incidents(first_timestamp)",
+)
+
+_ALERT_COLUMNS = (
+    ("host", "TEXT DEFAULT ''"),
+    ("fingerprint", "TEXT"),
+    ("activity_fingerprint", "TEXT"),
+    ("fingerprint_version", "INTEGER DEFAULT 1"),
+    ("occurrence_count", "INTEGER DEFAULT 1"),
+    ("first_seen", "DATETIME"),
+    ("last_seen", "DATETIME"),
+    ("state", "TEXT DEFAULT 'new'"),
+    ("last_event_data", "TEXT"),
+    ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
+)
+
+_VALID_ALERT_STATES = frozenset({
+    "new",
+    "acknowledged",
+    "investigating",
+    "resolved",
+    "false_positive",
+})
+
+
+def _serialize_json_list(values: Any) -> str:
+    """Serialize a list-like field while retaining the legacy empty value."""
+    return json.dumps(values) if values else "[]"
+
+
+def _serialize_alert_data(alert: Alert) -> Dict[str, str]:
+    """Serialize the structured fields shared by alert insert paths."""
+    return {
+        "mitre_attack": _serialize_json_list(alert.mitre_attack),
+        "response": _serialize_json_list(alert.response),
+        "event_data": json.dumps(alert.event.to_dict()),
+    }
+
+
+def _alert_insert_values(
+    alert: Alert, serialized: Dict[str, str]
+) -> Tuple[Any, ...]:
+    """Build values for the common alert columns."""
+    return (
+        alert.rule_id,
+        alert.rule_name,
+        alert.severity,
+        alert.score,
+        alert.event.platform,
+        alert.event.process_name,
+        alert.event.command_line,
+        alert.event.user,
+        alert.event.parent_process_name,
+        alert.timestamp,
+        serialized["mitre_attack"],
+        alert.description,
+        serialized["response"],
+        serialized["event_data"],
+    )
+
+
+def _deserialize_alert(row: sqlite3.Row) -> Dict[str, Any]:
+    """Convert a stored alert row into its public dictionary shape."""
+    alert = dict(row)
+    alert["mitre_attack"] = (
+        json.loads(alert["mitre_attack"]) if alert["mitre_attack"] else []
+    )
+    alert["response"] = json.loads(alert["response"]) if alert["response"] else []
+    alert["event_data"] = (
+        json.loads(alert["event_data"]) if alert["event_data"] else {}
+    )
+    return alert
+
+
+def _deserialize_incident(row: sqlite3.Row) -> Dict[str, Any]:
+    """Convert a stored incident row into its public dictionary shape."""
+    incident = dict(row)
+    for field in ("mitre_attack", "response", "stages"):
+        if incident.get(field):
+            incident[field] = json.loads(incident[field])
+    for field in ("first_timestamp", "last_timestamp"):
+        value = incident.get(field)
+        if isinstance(value, datetime):
+            incident[field] = value.isoformat()
+    return incident
+
+
 # Register datetime adapters/converters for SQLite
-def _adapt_datetime(dt):
+def _adapt_datetime(dt: datetime) -> str:
     """Convert datetime to ISO format string for SQLite"""
     return dt.isoformat()
 
 
-def _convert_datetime(s):
+def _convert_datetime(s: bytes) -> datetime:
     """Convert ISO format string from SQLite to datetime"""
     return datetime.fromisoformat(s.decode('utf-8'))
 
@@ -32,7 +229,7 @@ class AlertDatabase:
     SQLite database for storing and querying detection alerts
     """
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None) -> None:
         """
         Initialize database connection and create schema if needed
 
@@ -67,138 +264,16 @@ class AlertDatabase:
     def _create_schema(self):
         """Create database tables and indexes if they don't exist"""
         cursor = self.connection.cursor()
-
-        # Create alerts table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS alerts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                rule_id TEXT NOT NULL,
-                rule_name TEXT NOT NULL,
-                severity TEXT NOT NULL,
-                score INTEGER NOT NULL,
-                platform TEXT NOT NULL,
-                process_name TEXT NOT NULL,
-                command_line TEXT NOT NULL,
-                user TEXT NOT NULL,
-                parent_process_name TEXT,
-                timestamp DATETIME NOT NULL,
-                mitre_attack TEXT,
-                description TEXT,
-                response TEXT,
-                event_data TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # Migration: add dedup and lifecycle columns if they don't exist
+        cursor.execute(_CREATE_ALERTS_TABLE)
         self._migrate_schema(cursor)
-
-        # Create indexes for efficient queries
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_timestamp ON alerts(timestamp)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_severity ON alerts(severity)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_score ON alerts(score)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_platform ON alerts(platform)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_fingerprint ON alerts(fingerprint)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_state ON alerts(state)
-        """)
-
-        # Create suppressions table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS suppressions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                fingerprint TEXT NOT NULL,
-                fingerprint_version INTEGER NOT NULL DEFAULT 1,
-                scope TEXT NOT NULL
-                    CHECK (scope IN ('global', 'host')),
-                scope_value TEXT,
-                author TEXT NOT NULL,
-                reason TEXT NOT NULL,
-                starts_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                expires_at DATETIME NOT NULL,
-                active INTEGER NOT NULL DEFAULT 1
-                    CHECK (active IN (0, 1)),
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                revoked_at DATETIME,
-                revoked_by TEXT,
-                revoke_reason TEXT,
-                CHECK (
-                    (scope = 'global' AND scope_value IS NULL)
-                    OR
-                    (scope = 'host' AND scope_value IS NOT NULL)
-                ),
-                CHECK (expires_at > starts_at)
-            )
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_supp_fingerprint ON suppressions(fingerprint)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_supp_active ON suppressions(active)
-        """)
-
-        # Create audit trail table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS alert_audit (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                alert_id INTEGER NOT NULL,
-                action TEXT NOT NULL,
-                previous_state TEXT,
-                new_state TEXT,
-                author TEXT NOT NULL,
-                reason TEXT,
-                timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (alert_id) REFERENCES alerts(id)
-            )
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_audit_alert ON alert_audit(alert_id)
-        """)
-
-        # Create incidents table (correlated chain matches)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS incidents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chain_id TEXT NOT NULL,
-                chain_name TEXT NOT NULL,
-                severity TEXT NOT NULL,
-                platform TEXT NOT NULL,
-                host TEXT,
-                score INTEGER NOT NULL,
-                risk_band TEXT NOT NULL,
-                confidence INTEGER NOT NULL,
-                first_timestamp DATETIME,
-                last_timestamp DATETIME,
-                window_seconds INTEGER,
-                mitre_attack TEXT,
-                description TEXT,
-                response TEXT,
-                stages TEXT NOT NULL,
-                incident_fingerprint TEXT NOT NULL,
-                correlation_version INTEGER NOT NULL DEFAULT 1,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cursor.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_incident_fingerprint
-            ON incidents(incident_fingerprint)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_incident_chain ON incidents(chain_id)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_incident_first_ts ON incidents(first_timestamp)
-        """)
+        statements = (
+            _ALERT_INDEX_STATEMENTS
+            + _SUPPRESSION_SCHEMA_STATEMENTS
+            + _AUDIT_SCHEMA_STATEMENTS
+            + _INCIDENT_SCHEMA_STATEMENTS
+        )
+        for statement in statements:
+            cursor.execute(statement)
 
         self.connection.commit()
         logger.debug("Database schema created/verified")
@@ -209,28 +284,21 @@ class AlertDatabase:
         cursor.execute("PRAGMA table_info(alerts)")
         existing_cols = {row[1] for row in cursor.fetchall()}
 
-        new_columns = [
-            ("host", "TEXT DEFAULT ''"),
-            ("fingerprint", "TEXT"),
-            ("activity_fingerprint", "TEXT"),
-            ("fingerprint_version", "INTEGER DEFAULT 1"),
-            ("occurrence_count", "INTEGER DEFAULT 1"),
-            ("first_seen", "DATETIME"),
-            ("last_seen", "DATETIME"),
-            ("state", "TEXT DEFAULT 'new'"),
-            ("last_event_data", "TEXT"),
-            ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
-        ]
+        for column_name, column_definition in _ALERT_COLUMNS:
+            if column_name in existing_cols:
+                continue
+            self._add_alert_column(cursor, column_name, column_definition)
 
-        for col_name, col_def in new_columns:
-            if col_name not in existing_cols:
-                try:
-                    cursor.execute(
-                        f"ALTER TABLE alerts ADD COLUMN {col_name} {col_def}"
-                    )
-                    logger.info(f"Added column {col_name} to alerts table")
-                except Exception as e:
-                    logger.warning(f"Could not add column {col_name}: {e}")
+    @staticmethod
+    def _add_alert_column(cursor, column_name: str, column_definition: str):
+        """Add one migration column while retaining best-effort migration."""
+        try:
+            cursor.execute(
+                f"ALTER TABLE alerts ADD COLUMN {column_name} {column_definition}"
+            )
+            logger.info(f"Added column {column_name} to alerts table")
+        except Exception as error:
+            logger.warning(f"Could not add column {column_name}: {error}")
 
     def save_alert(self, alert: Alert) -> int:
         """
@@ -243,39 +311,23 @@ class AlertDatabase:
             Integer ID of the inserted alert
         """
         cursor = self.connection.cursor()
-
-        # Convert MITRE and response lists to JSON
-        mitre_json = json.dumps(alert.mitre_attack) if alert.mitre_attack else '[]'
-        response_json = json.dumps(alert.response) if alert.response else '[]'
-        event_json = json.dumps(alert.event.to_dict())
-
+        serialized = _serialize_alert_data(alert)
+        values = _alert_insert_values(alert, serialized)
         cursor.execute("""
             INSERT INTO alerts (
                 rule_id, rule_name, severity, score, platform,
                 process_name, command_line, user, parent_process_name,
                 timestamp, mitre_attack, description, response, event_data
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            alert.rule_id,
-            alert.rule_name,
-            alert.severity,
-            alert.score,
-            alert.event.platform,
-            alert.event.process_name,
-            alert.event.command_line,
-            alert.event.user,
-            alert.event.parent_process_name,
-            alert.timestamp,
-            mitre_json,
-            alert.description,
-            response_json,
-            event_json
-        ))
+        """, values)
 
         self.connection.commit()
         alert_id = cursor.lastrowid
 
-        logger.info(f"Alert saved to database: ID={alert_id}, rule={alert.rule_id}, score={alert.score}")
+        logger.info(
+            f"Alert saved to database: ID={alert_id}, rule={alert.rule_id}, "
+            f"score={alert.score}"
+        )
         return alert_id
 
     def save_alert_dedup(
@@ -294,27 +346,54 @@ class AlertDatabase:
             Dict with: alert_id, is_duplicate (bool), occurrence_count
         """
         from core.fingerprint import compute_fingerprint
-        from datetime import timedelta
 
         fps = compute_fingerprint(alert)
         fingerprint = fps["fingerprint"]
         activity_fp = fps["activity_fingerprint"]
         host = fps["host"]
 
-        # Check if suppressed
         if self._is_suppressed(fingerprint, activity_fp, host):
-            logger.info(f"Alert suppressed: {alert.rule_id} (fingerprint matched active suppression)")
-            return {"alert_id": None, "is_duplicate": False, "is_suppressed": True, "occurrence_count": 0}
+            logger.info(
+                f"Alert suppressed: {alert.rule_id} "
+                "(fingerprint matched active suppression)"
+            )
+            return {
+                "alert_id": None,
+                "is_duplicate": False,
+                "is_suppressed": True,
+                "occurrence_count": 0,
+            }
 
-        mitre_json = json.dumps(alert.mitre_attack) if alert.mitre_attack else '[]'
-        response_json = json.dumps(alert.response) if alert.response else '[]'
-        event_json = json.dumps(alert.event.to_dict())
-
+        serialized = _serialize_alert_data(alert)
         cursor = self.connection.cursor()
         window = timedelta(hours=dedup_window_hours)
         incoming_ts = alert.timestamp
+        existing = self._find_duplicate_alert(
+            cursor, fingerprint, incoming_ts, window
+        )
 
-        # Find existing open episode within the dedup window
+        if existing:
+            return self._update_duplicate_alert(
+                cursor, existing, alert, serialized["event_data"]
+            )
+
+        return self._insert_alert_episode(
+            cursor,
+            alert,
+            serialized,
+            host,
+            fingerprint,
+            activity_fp,
+        )
+
+    @staticmethod
+    def _find_duplicate_alert(
+        cursor,
+        fingerprint: str,
+        incoming_timestamp: datetime,
+        window: timedelta,
+    ):
+        """Find the newest open episode matching the deduplication window."""
         cursor.execute("""
             SELECT id, occurrence_count, first_seen, last_seen, state
             FROM alerts
@@ -326,70 +405,100 @@ class AlertDatabase:
             LIMIT 1
         """, (
             fingerprint,
-            incoming_ts - window,
-            incoming_ts + window,
+            incoming_timestamp - window,
+            incoming_timestamp + window,
         ))
+        return cursor.fetchone()
 
-        existing = cursor.fetchone()
+    def _update_duplicate_alert(
+        self,
+        cursor,
+        existing,
+        alert: Alert,
+        event_data: str,
+    ) -> Dict[str, Any]:
+        """Update and describe an existing deduplicated alert episode."""
+        alert_id = existing[0]
+        occurrence_count = existing[1] + 1
+        incoming_timestamp = alert.timestamp
+        cursor.execute("""
+            UPDATE alerts
+            SET occurrence_count = occurrence_count + 1,
+                first_seen = MIN(first_seen, ?),
+                last_seen = MAX(last_seen, ?),
+                timestamp = MAX(timestamp, ?),
+                score = MAX(score, ?),
+                updated_at = CURRENT_TIMESTAMP,
+                last_event_data = ?
+            WHERE id = ?
+        """, (
+            incoming_timestamp,
+            incoming_timestamp,
+            incoming_timestamp,
+            alert.score,
+            event_data,
+            alert_id,
+        ))
+        self.connection.commit()
+        logger.info(
+            f"Alert deduplicated: ID={alert_id}, rule={alert.rule_id}, "
+            f"occurrences={occurrence_count}"
+        )
+        return {
+            "alert_id": alert_id,
+            "is_duplicate": True,
+            "is_suppressed": False,
+            "occurrence_count": occurrence_count,
+        }
 
-        if existing:
-            # Duplicate: update existing episode
-            alert_id = existing[0]
-            current_count = existing[1]
-            cursor.execute("""
-                UPDATE alerts
-                SET occurrence_count = occurrence_count + 1,
-                    first_seen = MIN(first_seen, ?),
-                    last_seen = MAX(last_seen, ?),
-                    timestamp = MAX(timestamp, ?),
-                    score = MAX(score, ?),
-                    updated_at = CURRENT_TIMESTAMP,
-                    last_event_data = ?
-                WHERE id = ?
-            """, (
-                incoming_ts, incoming_ts, incoming_ts,
-                alert.score, event_json, alert_id,
-            ))
-            self.connection.commit()
-            new_count = current_count + 1
-            logger.info(f"Alert deduplicated: ID={alert_id}, rule={alert.rule_id}, occurrences={new_count}")
-            return {
-                "alert_id": alert_id,
-                "is_duplicate": True,
-                "is_suppressed": False,
-                "occurrence_count": new_count,
-            }
-        else:
-            # New episode: insert
-            cursor.execute("""
-                INSERT INTO alerts (
-                    rule_id, rule_name, severity, score, platform,
-                    process_name, command_line, user, parent_process_name,
-                    timestamp, mitre_attack, description, response, event_data,
-                    host, fingerprint, activity_fingerprint, fingerprint_version,
-                    occurrence_count, first_seen, last_seen, state, last_event_data,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """, (
-                alert.rule_id, alert.rule_name, alert.severity, alert.score,
-                alert.event.platform, alert.event.process_name,
-                alert.event.command_line, alert.event.user,
-                alert.event.parent_process_name, alert.timestamp,
-                mitre_json, alert.description, response_json, event_json,
-                host, fingerprint, activity_fp, 1,
-                1, incoming_ts, incoming_ts, event_json,
-            ))
-            self.connection.commit()
-            alert_id = cursor.lastrowid
-            logger.info(f"New alert episode saved: ID={alert_id}, rule={alert.rule_id}, score={alert.score}")
-            return {
-                "alert_id": alert_id,
-                "is_duplicate": False,
-                "is_suppressed": False,
-                "occurrence_count": 1,
-            }
+    def _insert_alert_episode(
+        self,
+        cursor,
+        alert: Alert,
+        serialized: Dict[str, str],
+        host: str,
+        fingerprint: str,
+        activity_fingerprint: str,
+    ) -> Dict[str, Any]:
+        """Insert and describe a new deduplicated alert episode."""
+        incoming_timestamp = alert.timestamp
+        values = _alert_insert_values(alert, serialized) + (
+            host,
+            fingerprint,
+            activity_fingerprint,
+            1,
+            1,
+            incoming_timestamp,
+            incoming_timestamp,
+            serialized["event_data"],
+        )
+        cursor.execute("""
+            INSERT INTO alerts (
+                rule_id, rule_name, severity, score, platform,
+                process_name, command_line, user, parent_process_name,
+                timestamp, mitre_attack, description, response, event_data,
+                host, fingerprint, activity_fingerprint, fingerprint_version,
+                occurrence_count, first_seen, last_seen, state, last_event_data,
+                created_at, updated_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                'new', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            )
+        """, values)
+        self.connection.commit()
+        alert_id = cursor.lastrowid
+        logger.info(
+            f"New alert episode saved: ID={alert_id}, rule={alert.rule_id}, "
+            f"score={alert.score}"
+        )
+        return {
+            "alert_id": alert_id,
+            "is_duplicate": False,
+            "is_suppressed": False,
+            "occurrence_count": 1,
+        }
 
-    def save_incident(self, incident) -> Dict[str, Any]:
+    def save_incident(self, incident: "Incident") -> Dict[str, Any]:
         """
         Store a correlated incident with fingerprint deduplication.
 
@@ -406,18 +515,32 @@ class AlertDatabase:
 
         fingerprint = compute_incident_fingerprint(incident)
         cursor = self.connection.cursor()
+        incident_id = self._find_incident_id(cursor, fingerprint)
+        if incident_id is not None:
+            logger.info(
+                f"Incident deduplicated: ID={incident_id}, chain={incident.chain_id}"
+            )
+            return {"incident_id": incident_id, "is_duplicate": True}
 
+        incident_id = self._insert_incident(cursor, incident, fingerprint)
+        logger.info(
+            f"New incident saved: ID={incident_id}, chain={incident.chain_id}, "
+            f"score={incident.score}"
+        )
+        return {"incident_id": incident_id, "is_duplicate": False}
+
+    @staticmethod
+    def _find_incident_id(cursor, fingerprint: str) -> Optional[int]:
+        """Return an existing incident ID for a fingerprint, if present."""
         cursor.execute(
             "SELECT id FROM incidents WHERE incident_fingerprint = ?",
             (fingerprint,),
         )
         existing = cursor.fetchone()
-        if existing:
-            logger.info(
-                f"Incident deduplicated: ID={existing[0]}, chain={incident.chain_id}"
-            )
-            return {"incident_id": existing[0], "is_duplicate": True}
+        return existing[0] if existing else None
 
+    def _insert_incident(self, cursor, incident, fingerprint: str) -> int:
+        """Insert a new correlated incident and return its database ID."""
         cursor.execute("""
             INSERT INTO incidents (
                 chain_id, chain_name, severity, platform, host,
@@ -432,19 +555,15 @@ class AlertDatabase:
             incident.score, incident.risk_band, incident.confidence,
             incident.first_timestamp, incident.last_timestamp,
             incident.window_seconds,
-            json.dumps(incident.mitre_attack) if incident.mitre_attack else '[]',
+            _serialize_json_list(incident.mitre_attack),
             incident.description,
-            json.dumps(incident.response) if incident.response else '[]',
+            _serialize_json_list(incident.response),
             json.dumps(incident.stages),
             fingerprint, incident.correlation_version,
         ))
         self.connection.commit()
         incident_id = cursor.lastrowid
-        logger.info(
-            f"New incident saved: ID={incident_id}, chain={incident.chain_id}, "
-            f"score={incident.score}"
-        )
-        return {"incident_id": incident_id, "is_duplicate": False}
+        return incident_id
 
     def get_incidents(
         self,
@@ -467,40 +586,28 @@ class AlertDatabase:
         Returns:
             List of incident dictionaries with parsed JSON fields
         """
-        query = "SELECT * FROM incidents WHERE 1=1"
+        query_parts = ["SELECT * FROM incidents WHERE 1=1"]
         params: List[Any] = []
 
-        if chain_id:
-            query += " AND chain_id = ?"
-            params.append(chain_id)
-        if severity:
-            query += " AND severity = ?"
-            params.append(severity)
-        if platform:
-            query += " AND platform = ?"
-            params.append(platform)
+        filters = (
+            (" AND chain_id = ?", chain_id),
+            (" AND severity = ?", severity),
+            (" AND platform = ?", platform),
+        )
+        for clause, value in filters:
+            if value:
+                query_parts.append(clause)
+                params.append(value)
         if min_score is not None:
-            query += " AND score >= ?"
+            query_parts.append(" AND score >= ?")
             params.append(min_score)
 
-        query += " ORDER BY first_timestamp DESC, id DESC LIMIT ?"
+        query_parts.append(" ORDER BY first_timestamp DESC, id DESC LIMIT ?")
         params.append(limit)
 
         cursor = self.connection.cursor()
-        cursor.execute(query, params)
-
-        incidents = []
-        for row in cursor.fetchall():
-            record = dict(row)
-            for json_field in ("mitre_attack", "response", "stages"):
-                if record.get(json_field):
-                    record[json_field] = json.loads(record[json_field])
-            for ts_field in ("first_timestamp", "last_timestamp"):
-                value = record.get(ts_field)
-                if isinstance(value, datetime):
-                    record[ts_field] = value.isoformat()
-            incidents.append(record)
-        return incidents
+        cursor.execute("".join(query_parts), params)
+        return [_deserialize_incident(row) for row in cursor.fetchall()]
 
     def _is_suppressed(
         self, fingerprint: str, activity_fingerprint: str, host: str
@@ -521,7 +628,7 @@ class AlertDatabase:
         return cursor.fetchone() is not None
 
     def add_suppression(
-        self, fingerprint: str, scope: str, scope_value: str,
+        self, fingerprint: str, scope: str, scope_value: Optional[str],
         author: str, reason: str, duration_hours: int,
         fingerprint_version: int = 1,
     ) -> int:
@@ -569,9 +676,10 @@ class AlertDatabase:
         Returns:
             True if updated, False if alert not found
         """
-        valid_states = {"new", "acknowledged", "investigating", "resolved", "false_positive"}
-        if new_state not in valid_states:
-            raise ValueError(f"Invalid state: {new_state}. Valid: {sorted(valid_states)}")
+        if new_state not in _VALID_ALERT_STATES:
+            raise ValueError(
+                f"Invalid state: {new_state}. Valid: {sorted(_VALID_ALERT_STATES)}"
+            )
 
         cursor = self.connection.cursor()
         # Get current state
@@ -594,11 +702,24 @@ class AlertDatabase:
         """, (alert_id, previous_state, new_state, author, reason))
 
         self.connection.commit()
-        logger.info(f"Alert {alert_id} state changed: {previous_state} -> {new_state} by {author}")
+        logger.info(
+            f"Alert {alert_id} state changed: {previous_state} -> {new_state} "
+            f"by {author}"
+        )
         return True
 
-    def get_alerts(self, start_time: datetime = None, end_time: datetime = None,
-                   limit: int = 100) -> List[Dict[str, Any]]:
+    def _query_alerts(self, query: str, params) -> List[Dict[str, Any]]:
+        """Execute an alert query and deserialize its structured fields."""
+        cursor = self.connection.cursor()
+        cursor.execute(query, params)
+        return [_deserialize_alert(row) for row in cursor.fetchall()]
+
+    def get_alerts(
+        self,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
         """
         Query alerts with optional time filtering
 
@@ -610,32 +731,20 @@ class AlertDatabase:
         Returns:
             List of alert dictionaries
         """
-        cursor = self.connection.cursor()
-        query = "SELECT * FROM alerts WHERE 1=1"
+        query_parts = ["SELECT * FROM alerts WHERE 1=1"]
         params = []
 
         if start_time:
-            query += " AND timestamp >= ?"
+            query_parts.append(" AND timestamp >= ?")
             params.append(start_time)
 
         if end_time:
-            query += " AND timestamp <= ?"
+            query_parts.append(" AND timestamp <= ?")
             params.append(end_time)
 
-        query += " ORDER BY timestamp DESC LIMIT ?"
+        query_parts.append(" ORDER BY timestamp DESC LIMIT ?")
         params.append(limit)
-
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-
-        alerts = []
-        for row in rows:
-            alert_dict = dict(row)
-            # Parse JSON fields
-            alert_dict['mitre_attack'] = json.loads(alert_dict['mitre_attack']) if alert_dict['mitre_attack'] else []
-            alert_dict['response'] = json.loads(alert_dict['response']) if alert_dict['response'] else []
-            alert_dict['event_data'] = json.loads(alert_dict['event_data']) if alert_dict['event_data'] else {}
-            alerts.append(alert_dict)
+        alerts = self._query_alerts("".join(query_parts), params)
 
         logger.debug(f"Retrieved {len(alerts)} alerts from database")
         return alerts
@@ -650,21 +759,11 @@ class AlertDatabase:
         Returns:
             List of alert dictionaries
         """
-        cursor = self.connection.cursor()
-        cursor.execute("""
+        alerts = self._query_alerts("""
             SELECT * FROM alerts
             WHERE severity = ?
             ORDER BY timestamp DESC
         """, (severity,))
-
-        rows = cursor.fetchall()
-        alerts = []
-        for row in rows:
-            alert_dict = dict(row)
-            alert_dict['mitre_attack'] = json.loads(alert_dict['mitre_attack']) if alert_dict['mitre_attack'] else []
-            alert_dict['response'] = json.loads(alert_dict['response']) if alert_dict['response'] else []
-            alert_dict['event_data'] = json.loads(alert_dict['event_data']) if alert_dict['event_data'] else {}
-            alerts.append(alert_dict)
 
         logger.debug(f"Retrieved {len(alerts)} alerts with severity={severity}")
         return alerts
@@ -679,21 +778,11 @@ class AlertDatabase:
         Returns:
             List of alert dictionaries
         """
-        cursor = self.connection.cursor()
-        cursor.execute("""
+        alerts = self._query_alerts("""
             SELECT * FROM alerts
             WHERE platform = ?
             ORDER BY timestamp DESC
         """, (platform,))
-
-        rows = cursor.fetchall()
-        alerts = []
-        for row in rows:
-            alert_dict = dict(row)
-            alert_dict['mitre_attack'] = json.loads(alert_dict['mitre_attack']) if alert_dict['mitre_attack'] else []
-            alert_dict['response'] = json.loads(alert_dict['response']) if alert_dict['response'] else []
-            alert_dict['event_data'] = json.loads(alert_dict['event_data']) if alert_dict['event_data'] else {}
-            alerts.append(alert_dict)
 
         logger.debug(f"Retrieved {len(alerts)} alerts for platform={platform}")
         return alerts
@@ -708,21 +797,11 @@ class AlertDatabase:
         Returns:
             List of alert dictionaries
         """
-        cursor = self.connection.cursor()
-        cursor.execute("""
+        alerts = self._query_alerts("""
             SELECT * FROM alerts
             WHERE score >= ?
             ORDER BY score DESC, timestamp DESC
         """, (min_score,))
-
-        rows = cursor.fetchall()
-        alerts = []
-        for row in rows:
-            alert_dict = dict(row)
-            alert_dict['mitre_attack'] = json.loads(alert_dict['mitre_attack']) if alert_dict['mitre_attack'] else []
-            alert_dict['response'] = json.loads(alert_dict['response']) if alert_dict['response'] else []
-            alert_dict['event_data'] = json.loads(alert_dict['event_data']) if alert_dict['event_data'] else {}
-            alerts.append(alert_dict)
 
         logger.debug(f"Retrieved {len(alerts)} alerts with score >= {min_score}")
         return alerts
@@ -740,28 +819,37 @@ class AlertDatabase:
             - alerts_last_24h: Count in last 24 hours
         """
         cursor = self.connection.cursor()
-
-        # Total alerts
         cursor.execute("SELECT COUNT(*) FROM alerts")
         total_alerts = cursor.fetchone()[0]
+        by_severity = self._get_group_counts(
+            cursor,
+            "SELECT severity, COUNT(*) FROM alerts GROUP BY severity",
+        )
+        by_platform = self._get_group_counts(
+            cursor,
+            "SELECT platform, COUNT(*) FROM alerts GROUP BY platform",
+        )
+        score_distribution = self._get_score_distribution(cursor)
+        alerts_last_24h = self._get_recent_alert_count(cursor)
 
-        # By severity
-        cursor.execute("""
-            SELECT severity, COUNT(*)
-            FROM alerts
-            GROUP BY severity
-        """)
-        by_severity = {row[0]: row[1] for row in cursor.fetchall()}
+        logger.debug(f"Database stats: {total_alerts} total alerts")
+        return {
+            "total_alerts": total_alerts,
+            "by_severity": by_severity,
+            "by_platform": by_platform,
+            "score_distribution": score_distribution,
+            "alerts_last_24h": alerts_last_24h,
+        }
 
-        # By platform
-        cursor.execute("""
-            SELECT platform, COUNT(*)
-            FROM alerts
-            GROUP BY platform
-        """)
-        by_platform = {row[0]: row[1] for row in cursor.fetchall()}
+    @staticmethod
+    def _get_group_counts(cursor, query: str) -> Dict[str, int]:
+        """Return grouped count rows as a mapping."""
+        cursor.execute(query)
+        return {row[0]: row[1] for row in cursor.fetchall()}
 
-        # Score distribution
+    @staticmethod
+    def _get_score_distribution(cursor) -> Dict[str, int]:
+        """Return alert counts for the configured score bands."""
         cursor.execute("""
             SELECT
                 SUM(CASE WHEN score BETWEEN 0 AND 50 THEN 1 ELSE 0 END) as low,
@@ -770,43 +858,34 @@ class AlertDatabase:
             FROM alerts
         """)
         score_row = cursor.fetchone()
-        score_distribution = {
-            '0-50': score_row[0] or 0,
-            '51-100': score_row[1] or 0,
-            '101-150': score_row[2] or 0
+        return {
+            "0-50": score_row[0] or 0,
+            "51-100": score_row[1] or 0,
+            "101-150": score_row[2] or 0,
         }
 
-        # Alerts in last 24 hours
+    @staticmethod
+    def _get_recent_alert_count(cursor) -> int:
+        """Return the number of alerts seen during the last 24 hours."""
         twenty_four_hours_ago = datetime.now() - timedelta(hours=24)
         cursor.execute("""
             SELECT COUNT(*)
             FROM alerts
             WHERE timestamp >= ?
         """, (twenty_four_hours_ago,))
-        alerts_last_24h = cursor.fetchone()[0]
+        return cursor.fetchone()[0]
 
-        stats = {
-            'total_alerts': total_alerts,
-            'by_severity': by_severity,
-            'by_platform': by_platform,
-            'score_distribution': score_distribution,
-            'alerts_last_24h': alerts_last_24h
-        }
-
-        logger.debug(f"Database stats: {total_alerts} total alerts")
-        return stats
-
-    def close(self):
+    def close(self) -> None:
         """Close database connection"""
         if self.connection:
             self.connection.close()
             logger.info("Database connection closed")
 
-    def __enter__(self):
+    def __enter__(self) -> "AlertDatabase":
         """Context manager entry"""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         """Context manager exit"""
         self.close()
         return False
