@@ -1,20 +1,29 @@
 """
 Detection engine - matches events against rules to generate alerts
 """
-import re
+import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Dict, Any, Tuple
+from typing import Any, Callable, Dict, List, Tuple
+
 from collectors.base import Event
+from core.command_analyzer import analyze_command
 from core.rule_loader import Rule
 from core.scorer import (
-    Scorer, MatchEvidence, ContextEvidence, ScoreResult, SCORING_VERSION,
+    ContextEvidence,
+    MatchEvidence,
+    Scorer,
+    ScoreResult,
 )
-from core.command_analyzer import analyze_command
-import logging
 
 logger = logging.getLogger(__name__)
+
+_SYSTEM_USERS = frozenset(("SYSTEM", "NT AUTHORITY\\SYSTEM", "ROOT"))
+_SUSPICIOUS_SYSTEM_ANOMALIES = frozenset(
+    ("encoded_payload", "download_cradle")
+)
 
 
 def normalize_process_name(name: str, platform: str) -> str:
@@ -41,6 +50,94 @@ def normalize_process_name(name: str, platform: str) -> str:
     if platform == "windows":
         basename = basename.lower()
     return basename
+
+
+def _process_names_match(
+    expected: str,
+    actual: str,
+    expected_platform: str,
+    actual_platform: str,
+) -> bool:
+    """Compare process basenames using each value's platform semantics."""
+    return normalize_process_name(
+        expected, expected_platform
+    ) == normalize_process_name(actual, actual_platform)
+
+
+def _matches_process_name(event: Event, rule: Rule) -> bool:
+    """Match the event process against the configured process basename."""
+    return _process_names_match(
+        rule.detection["process_name"].strip(),
+        event.process_name,
+        rule.platform,
+        event.platform,
+    )
+
+
+def _matches_command_contains(event: Event, rule: Rule) -> bool:
+    """Require every configured command fragment to be present."""
+    command_line = event.command_line.lower()
+    return all(
+        item.lower() in command_line
+        for item in rule.detection["command_contains"]
+    )
+
+
+def _matches_command_contains_any(event: Event, rule: Rule) -> bool:
+    """Require at least one configured command fragment to be present."""
+    items = rule.detection["command_contains_any"]
+    if not items:
+        return False
+
+    command_line = event.command_line.lower()
+    return any(item.lower() in command_line for item in items)
+
+
+def _matches_regex(event_value: str, rule: Rule, criterion: str) -> bool:
+    """Match a value with the rule's cached regex or its fallback pattern."""
+    compiled = rule.get_compiled_regex(criterion)
+    if compiled:
+        return compiled.search(event_value) is not None
+
+    pattern = rule.detection[criterion]
+    return re.search(pattern, event_value, re.IGNORECASE) is not None
+
+
+def _matches_command_regex(event: Event, rule: Rule) -> bool:
+    """Match the command line against the configured regex."""
+    return _matches_regex(event.command_line, rule, "command_regex")
+
+
+def _matches_parent_process(event: Event, rule: Rule) -> bool:
+    """Match the event parent against the configured process basename."""
+    if not event.parent_process_name:
+        return False
+
+    return _process_names_match(
+        rule.detection["parent_process"].strip(),
+        event.parent_process_name,
+        rule.platform,
+        event.platform,
+    )
+
+
+def _matches_user_pattern(event: Event, rule: Rule) -> bool:
+    """Match the event user against the configured regex."""
+    return _matches_regex(event.user, rule, "user_pattern")
+
+
+_CriterionMatcher = Callable[[Event, Rule], bool]
+_CRITERION_MATCHERS: Tuple[Tuple[str, _CriterionMatcher], ...] = (
+    ("process_name", _matches_process_name),
+    ("command_contains", _matches_command_contains),
+    ("command_contains_any", _matches_command_contains_any),
+    ("command_regex", _matches_command_regex),
+    ("parent_process", _matches_parent_process),
+    ("user_pattern", _matches_user_pattern),
+)
+_DETECTION_CRITERIA = tuple(
+    criterion for criterion, _matcher in _CRITERION_MATCHERS
+)
 
 
 @dataclass
@@ -79,12 +176,18 @@ class Alert:
             'scoring_version': self.scoring_version,
             'severity_subscore': self.severity_subscore,
             'confidence_subscore': self.confidence_subscore,
-            'score_breakdown': self.score_breakdown if self.score_breakdown else None,
+            'score_breakdown': (
+                self.score_breakdown if self.score_breakdown else None
+            ),
             'event': self.event.to_dict()
         }
 
-    def __repr__(self):
-        return f"Alert(rule_id={self.rule_id}, severity={self.severity}, score={self.score}, risk_band={self.risk_band}, process={self.event.process_name})"
+    def __repr__(self) -> str:
+        return (
+            f"Alert(rule_id={self.rule_id}, severity={self.severity}, "
+            f"score={self.score}, risk_band={self.risk_band}, "
+            f"process={self.event.process_name})"
+        )
 
 
 class DetectionEngine:
@@ -116,45 +219,62 @@ class DetectionEngine:
         alerts = []
 
         for rule in self.rules:
-            # Skip if platforms don't match
-            if rule.platform != event.platform:
-                continue
-
-            # Check if event matches the rule and get match evidence
-            match_result = self._matches_rule_with_evidence(event, rule)
-            if match_result is not None:
-                # Check whitelist - if whitelisted, skip this rule
-                if self._is_whitelisted(event, rule):
-                    logger.debug(f"Event whitelisted for rule {rule.id}: {event.process_name}")
-                    continue
-
-                # Build context evidence from the event
-                context = self._build_context_evidence(event, rule, match_result)
-
-                # Calculate v2 score with full evidence
-                score_result = self.scorer.score(rule, match_result, context)
-
-                # Create alert
-                alert = Alert(
-                    rule_id=rule.id,
-                    rule_name=rule.name,
-                    severity=rule.severity,
-                    event=event,
-                    timestamp=event.timestamp,
-                    mitre_attack=rule.mitre_attack,
-                    description=rule.description,
-                    response=rule.response,
-                    score=score_result.score,
-                    risk_band=score_result.risk_band,
-                    severity_subscore=score_result.severity_subscore,
-                    confidence_subscore=score_result.confidence_subscore,
-                    scoring_version=score_result.scoring_version,
-                    score_breakdown=score_result.breakdown,
-                )
+            alert = self._match_rule(event, rule)
+            if alert is not None:
                 alerts.append(alert)
-                logger.info(f"Alert generated: {rule.id} - {rule.name} (score: {score_result.score}, risk: {score_result.risk_band}) for process {event.process_name}")
 
         return alerts
+
+    def _match_rule(self, event: Event, rule: Rule) -> Alert | None:
+        """Return an alert when one rule applies to an event."""
+        if rule.platform != event.platform:
+            return None
+
+        match_result = self._matches_rule_with_evidence(event, rule)
+        if match_result is None:
+            return None
+
+        if self._is_whitelisted(event, rule):
+            logger.debug(
+                f"Event whitelisted for rule {rule.id}: "
+                f"{event.process_name}"
+            )
+            return None
+
+        context = self._build_context_evidence(event, rule, match_result)
+        score_result = self.scorer.score(rule, match_result, context)
+        alert = self._create_alert(event, rule, score_result)
+        logger.info(
+            f"Alert generated: {rule.id} - {rule.name} "
+            f"(score: {score_result.score}, "
+            f"risk: {score_result.risk_band}) "
+            f"for process {event.process_name}"
+        )
+        return alert
+
+    @staticmethod
+    def _create_alert(
+        event: Event,
+        rule: Rule,
+        score_result: ScoreResult,
+    ) -> Alert:
+        """Create an alert from a matched rule and its score."""
+        return Alert(
+            rule_id=rule.id,
+            rule_name=rule.name,
+            severity=rule.severity,
+            event=event,
+            timestamp=event.timestamp,
+            mitre_attack=rule.mitre_attack,
+            description=rule.description,
+            response=rule.response,
+            score=score_result.score,
+            risk_band=score_result.risk_band,
+            severity_subscore=score_result.severity_subscore,
+            confidence_subscore=score_result.confidence_subscore,
+            scoring_version=score_result.scoring_version,
+            score_breakdown=score_result.breakdown,
+        )
 
     def match_events(self, events: List[Event]) -> List[Alert]:
         """
@@ -172,7 +292,10 @@ class DetectionEngine:
             alerts = self.match_event(event)
             all_alerts.extend(alerts)
 
-        logger.info(f"Processed {len(events)} events, generated {len(all_alerts)} alerts")
+        logger.info(
+            f"Processed {len(events)} events, "
+            f"generated {len(all_alerts)} alerts"
+        )
         return all_alerts
 
     def _matches_rule(self, event: Event, rule: Rule) -> bool:
@@ -202,112 +325,43 @@ class DetectionEngine:
             MatchEvidence if matched, None if not matched
         """
         detection = rule.detection
-        configured: List[str] = []
+        configured = self._configured_criteria(detection)
         matched: List[str] = []
-        partially_matched: List[str] = []
-        has_or_semantics = False
 
-        # Track configured criteria
-        for key in (
-            "process_name", "command_contains", "command_contains_any",
-            "command_regex", "parent_process", "user_pattern",
-        ):
-            if key in detection and detection[key]:
-                configured.append(key)
-
-        # Check process name if specified (exact basename match)
-        if 'process_name' in detection:
-            configured.append("process_name") if "process_name" not in configured else None
-            expected = detection['process_name'].strip()
-            # Normalize both to basenames for exact comparison
-            expected_base = normalize_process_name(expected, rule.platform)
-            actual_base = normalize_process_name(event.process_name, event.platform)
-
-            if expected_base != actual_base:
+        for criterion, matcher in _CRITERION_MATCHERS:
+            if criterion not in detection:
+                continue
+            if not matcher(event, rule):
                 return None
-            matched.append("process_name")
+            matched.append(criterion)
 
-        # Check command_contains (ALL items must be present - AND logic)
-        if 'command_contains' in detection:
-            command_line_lower = event.command_line.lower()
-
-            for item in detection['command_contains']:
-                if item.lower() not in command_line_lower:
-                    # AND logic: one missing means no match
-                    partially_matched.append("command_contains")
-                    return None
-            matched.append("command_contains")
-
-        # Check command_contains_any (ANY item present - OR logic)
-        if 'command_contains_any' in detection:
-            has_or_semantics = True
-            command_line_lower = event.command_line.lower()
-            items = detection['command_contains_any']
-
-            if not items:
-                return None
-
-            if any(item.lower() in command_line_lower for item in items):
-                matched.append("command_contains_any")
-            else:
-                return None
-
-        # Check command_regex if specified (use precompiled pattern)
-        if 'command_regex' in detection:
-            compiled = rule.get_compiled_regex('command_regex')
-            if compiled:
-                if not compiled.search(event.command_line):
-                    return None
-            else:
-                # Fallback: should not happen if rule loaded correctly
-                pattern = detection['command_regex']
-                if not re.search(pattern, event.command_line, re.IGNORECASE):
-                    return None
-            matched.append("command_regex")
-
-        # Check parent process if specified (exact basename match)
-        if 'parent_process' in detection:
-            if not event.parent_process_name:
-                return None
-
-            expected = detection['parent_process'].strip()
-            expected_base = normalize_process_name(expected, rule.platform)
-            actual_base = normalize_process_name(event.parent_process_name, event.platform)
-
-            if expected_base != actual_base:
-                return None
-            matched.append("parent_process")
-
-        # Check user pattern if specified (use precompiled pattern)
-        if 'user_pattern' in detection:
-            compiled = rule.get_compiled_regex('user_pattern')
-            if compiled:
-                if not compiled.search(event.user):
-                    return None
-            else:
-                pattern = detection['user_pattern']
-                if not re.search(pattern, event.user, re.IGNORECASE):
-                    return None
-            matched.append("user_pattern")
-
-        # All checks passed. Build and return match evidence.
-        # Remove duplicates while preserving order
-        configured_unique = list(dict.fromkeys(configured))
-        matched_unique = list(dict.fromkeys(matched))
-
-        semantics = "or" if has_or_semantics else "and"
+        configured_unique = tuple(dict.fromkeys(configured))
+        matched_unique = tuple(dict.fromkeys(matched))
+        semantics = "or" if "command_contains_any" in detection else "and"
         required_missing = (
             semantics == "and"
             and len(matched_unique) < len(configured_unique)
         )
 
         return MatchEvidence(
-            configured_criteria=tuple(configured_unique),
-            matched_criteria=tuple(matched_unique),
-            partially_matched_criteria=tuple(partially_matched),
+            configured_criteria=configured_unique,
+            matched_criteria=matched_unique,
+            partially_matched_criteria=(),
             semantics=semantics,
             required_criteria_missing=required_missing,
         )
+
+    @staticmethod
+    def _configured_criteria(detection: Dict[str, Any]) -> List[str]:
+        """List nonempty configured criteria in matching order."""
+        configured = [
+            criterion
+            for criterion in _DETECTION_CRITERIA
+            if criterion in detection and detection[criterion]
+        ]
+        if "process_name" in detection and "process_name" not in configured:
+            configured.append("process_name")
+        return configured
 
     def _build_context_evidence(
         self,
@@ -321,45 +375,49 @@ class DetectionEngine:
         Determines parent context, user context, command anomalies,
         whitelist adjacency, and admin context classifications.
         """
-        # Parent context classification
-        parent_reason = "missing_telemetry"
-        rule_parent = rule.detection.get("parent_process")
-        if rule_parent and event.parent_process_name:
-            expected_base = normalize_process_name(rule_parent, rule.platform)
-            actual_base = normalize_process_name(event.parent_process_name, event.platform)
-            if expected_base == actual_base:
-                parent_reason = "suspicious_parent_match"
-            else:
-                parent_reason = "neutral_lineage"
-        elif event.parent_process_name:
-            parent_reason = "neutral_lineage"
-
-        # User context classification
-        user_reason = "neutral"
-
-        # Command anomaly indicators
+        parent_reason = self._classify_parent_context(event, rule)
         anomalies = tuple(analyze_command(event.command_line))
-
-        # SYSTEM/root running interactive commands with anomalies is suspicious
-        if event.user:
-            user_upper = event.user.upper()
-            if user_upper in ("SYSTEM", "NT AUTHORITY\\SYSTEM", "ROOT"):
-                if any(a in ("encoded_payload", "download_cradle") for a in anomalies):
-                    user_reason = "system_interactive_shell"
-
-        # Whitelist adjacency (alert passed whitelist check, so no exact match)
-        whitelist_reason = "no_match"
-
-        # Admin context (not evaluated in this version)
-        admin_reason = "not_admin_context"
+        user_reason = self._classify_user_context(event, anomalies)
 
         return ContextEvidence(
             parent_reason=parent_reason,
             user_reason=user_reason,
             command_anomalies=anomalies,
-            whitelist_reason=whitelist_reason,
-            admin_reason=admin_reason,
+            whitelist_reason="no_match",
+            admin_reason="not_admin_context",
         )
+
+    @staticmethod
+    def _classify_parent_context(event: Event, rule: Rule) -> str:
+        """Classify parent process evidence for scoring."""
+        rule_parent = rule.detection.get("parent_process")
+        if not event.parent_process_name:
+            return "missing_telemetry"
+        if not rule_parent:
+            return "neutral_lineage"
+        if _process_names_match(
+            rule_parent,
+            event.parent_process_name,
+            rule.platform,
+            event.platform,
+        ):
+            return "suspicious_parent_match"
+        return "neutral_lineage"
+
+    @staticmethod
+    def _classify_user_context(
+        event: Event,
+        anomalies: Tuple[str, ...],
+    ) -> str:
+        """Classify suspicious privileged user activity for scoring."""
+        if not event.user or event.user.upper() not in _SYSTEM_USERS:
+            return "neutral"
+        if any(
+            anomaly in _SUSPICIOUS_SYSTEM_ANOMALIES
+            for anomaly in anomalies
+        ):
+            return "system_interactive_shell"
+        return "neutral"
 
     def _is_whitelisted(self, event: Event, rule: Rule) -> bool:
         """
@@ -377,35 +435,68 @@ class DetectionEngine:
         if not whitelist:
             return False
 
-        # Check whitelisted users
-        if 'users' in whitelist and whitelist['users']:
-            for whitelisted_user in whitelist['users']:
-                if whitelisted_user.lower() == event.user.lower():
-                    logger.debug(f"Event whitelisted by user: {event.user}")
-                    return True
+        return (
+            self._is_user_whitelisted(event, whitelist)
+            or self._is_parent_whitelisted(event, whitelist)
+            or self._is_path_whitelisted(event, whitelist)
+        )
 
-        # Check whitelisted parent processes (exact basename match)
-        if 'parent_processes' in whitelist and whitelist['parent_processes']:
-            if event.parent_process_name:
-                actual_parent_base = normalize_process_name(
-                    event.parent_process_name, event.platform
-                )
-                for whitelisted_parent in whitelist['parent_processes']:
-                    expected_base = normalize_process_name(
-                        whitelisted_parent, event.platform
-                    )
-                    if expected_base == actual_parent_base:
-                        logger.debug(f"Event whitelisted by parent process: {event.parent_process_name}")
-                        return True
+    @staticmethod
+    def _is_user_whitelisted(
+        event: Event,
+        whitelist: Dict[str, Any],
+    ) -> bool:
+        """Check the whitelist's case insensitive user entries."""
+        users = whitelist.get("users")
+        if not users:
+            return False
 
-        # Check whitelisted paths
-        if 'paths' in whitelist and whitelist['paths']:
-            if event.working_directory:
-                for whitelisted_path in whitelist['paths']:
-                    if whitelisted_path.lower() in event.working_directory.lower():
-                        logger.debug(f"Event whitelisted by path: {event.working_directory}")
-                        return True
+        event_user = event.user.lower()
+        if any(user.lower() == event_user for user in users):
+            logger.debug(f"Event whitelisted by user: {event.user}")
+            return True
+        return False
 
+    @staticmethod
+    def _is_parent_whitelisted(
+        event: Event,
+        whitelist: Dict[str, Any],
+    ) -> bool:
+        """Check the whitelist's normalized parent process entries."""
+        parents = whitelist.get("parent_processes")
+        if not parents or not event.parent_process_name:
+            return False
+
+        actual_parent = normalize_process_name(
+            event.parent_process_name, event.platform
+        )
+        if any(
+            normalize_process_name(parent, event.platform) == actual_parent
+            for parent in parents
+        ):
+            logger.debug(
+                "Event whitelisted by parent process: "
+                f"{event.parent_process_name}"
+            )
+            return True
+        return False
+
+    @staticmethod
+    def _is_path_whitelisted(
+        event: Event,
+        whitelist: Dict[str, Any],
+    ) -> bool:
+        """Check whether the working directory contains a listed path."""
+        paths = whitelist.get("paths")
+        if not paths or not event.working_directory:
+            return False
+
+        working_directory = event.working_directory.lower()
+        if any(path.lower() in working_directory for path in paths):
+            logger.debug(
+                f"Event whitelisted by path: {event.working_directory}"
+            )
+            return True
         return False
 
     def get_stats(self) -> Dict[str, Any]:
@@ -419,12 +510,14 @@ class DetectionEngine:
             return {'total_rules': 0}
 
         severity_counts = {}
-        for rule in self.rules:
-            severity_counts[rule.severity] = severity_counts.get(rule.severity, 0) + 1
-
         platform_counts = {}
         for rule in self.rules:
-            platform_counts[rule.platform] = platform_counts.get(rule.platform, 0) + 1
+            severity_counts[rule.severity] = (
+                severity_counts.get(rule.severity, 0) + 1
+            )
+            platform_counts[rule.platform] = (
+                platform_counts.get(rule.platform, 0) + 1
+            )
 
         return {
             'total_rules': len(self.rules),

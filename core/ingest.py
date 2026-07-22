@@ -34,18 +34,27 @@ class Checkpoint:
     inode and size detect log rotation and truncation: if the file's
     inode changes or its size drops below the recorded offset, the
     source was rotated or truncated and reading restarts from zero.
+    mtime catches the remaining case: an inode reused by the filesystem
+    immediately after unlink plus a coincidentally identical size, where
+    neither inode nor size changes but the file was still replaced.
     """
     source: str
     offset: int = 0
     inode: Optional[int] = None
     size: int = 0
     events_ingested: int = 0
+    mtime: float = 0.0
 
-    def rotated(self, current_inode: int, current_size: int) -> bool:
-        """True when the file was rotated (new inode) or truncated."""
+    def rotated(self, current_inode: int, current_size: int, current_mtime: float = 0.0) -> bool:
+        """True when the file was rotated (new inode), truncated, or replaced."""
         if self.inode is not None and current_inode != self.inode:
             return True
         if current_size < self.offset:
+            return True
+        # Unchanged size but a different mtime means the file was rewritten
+        # since we last saw it. A real append always grows the size, so this
+        # only fires for a same-size replace, not for ordinary growth.
+        if current_size == self.size and self.mtime and current_mtime and current_mtime != self.mtime:
             return True
         return False
 
@@ -88,8 +97,9 @@ def read_new_text(path: str, checkpoint: Checkpoint) -> Dict[str, Any]:
     stat = os.stat(path)
     inode = stat.st_ino
     size = stat.st_size
+    mtime = stat.st_mtime
 
-    reset = checkpoint.rotated(inode, size)
+    reset = checkpoint.rotated(inode, size, mtime)
     start = 0 if reset else checkpoint.offset
     if reset and checkpoint.offset:
         logger.info(f"Source rotated or truncated, restarting: {path}")
@@ -109,7 +119,7 @@ def read_new_text(path: str, checkpoint: Checkpoint) -> Dict[str, Any]:
             # No complete line available yet.
             return {
                 "text": "", "start": start, "new_offset": start,
-                "inode": inode, "size": size, "reset": reset,
+                "inode": inode, "size": size, "mtime": mtime, "reset": reset,
             }
         complete_bytes = raw[: last_nl + 1]
     else:
@@ -119,7 +129,7 @@ def read_new_text(path: str, checkpoint: Checkpoint) -> Dict[str, Any]:
     return {
         "text": complete_bytes.decode("utf-8", errors="replace"),
         "start": start, "new_offset": new_offset,
-        "inode": inode, "size": size, "reset": reset,
+        "inode": inode, "size": size, "mtime": mtime, "reset": reset,
     }
 
 
@@ -143,6 +153,7 @@ class CheckpointStore:
                 offset INTEGER NOT NULL DEFAULT 0,
                 inode INTEGER,
                 size INTEGER NOT NULL DEFAULT 0,
+                mtime REAL NOT NULL DEFAULT 0.0,
                 events_ingested INTEGER NOT NULL DEFAULT 0,
                 ingest_version INTEGER NOT NULL DEFAULT 1,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -154,7 +165,7 @@ class CheckpointStore:
         """Load the checkpoint for a source, or a fresh zero checkpoint."""
         cursor = self.db.connection.cursor()
         cursor.execute(
-            "SELECT source, offset, inode, size, events_ingested "
+            "SELECT source, offset, inode, size, mtime, events_ingested "
             "FROM ingest_checkpoints WHERE source = ?",
             (source,),
         )
@@ -163,7 +174,7 @@ class CheckpointStore:
             return Checkpoint(source=source)
         return Checkpoint(
             source=row[0], offset=row[1], inode=row[2],
-            size=row[3], events_ingested=row[4],
+            size=row[3], mtime=row[4], events_ingested=row[5],
         )
 
     def save(self, checkpoint: Checkpoint) -> None:
@@ -171,17 +182,18 @@ class CheckpointStore:
         cursor = self.db.connection.cursor()
         cursor.execute("""
             INSERT INTO ingest_checkpoints
-                (source, offset, inode, size, events_ingested, ingest_version, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                (source, offset, inode, size, mtime, events_ingested, ingest_version, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(source) DO UPDATE SET
                 offset = excluded.offset,
                 inode = excluded.inode,
                 size = excluded.size,
+                mtime = excluded.mtime,
                 events_ingested = excluded.events_ingested,
                 updated_at = CURRENT_TIMESTAMP
         """, (
             checkpoint.source, checkpoint.offset, checkpoint.inode,
-            checkpoint.size, checkpoint.events_ingested, INGEST_VERSION,
+            checkpoint.size, checkpoint.mtime, checkpoint.events_ingested, INGEST_VERSION,
         ))
         self.db.connection.commit()
 
@@ -304,9 +316,10 @@ class IngestionService:
 
         text = read["text"]
         if not text:
-            # Nothing new; still record inode/size so rotation is tracked.
+            # Nothing new; still record inode/size/mtime so rotation is tracked.
             checkpoint.inode = read["inode"]
             checkpoint.size = read["size"]
+            checkpoint.mtime = read["mtime"]
             checkpoint.offset = read["new_offset"]
             self.checkpoints.save(checkpoint)
             summary["end_offset"] = checkpoint.offset
@@ -334,6 +347,7 @@ class IngestionService:
         # Idempotent dedup makes a boundary reprocess after a crash safe.
         checkpoint.inode = read["inode"]
         checkpoint.size = read["size"]
+        checkpoint.mtime = read["mtime"]
         checkpoint.offset = consumed_offset
         self.checkpoints.save(checkpoint)
 
