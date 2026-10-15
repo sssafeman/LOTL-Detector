@@ -9,7 +9,7 @@ from flask import Flask, g, has_request_context
 
 from collectors.base import BaseCollector, Event
 from core.correlator import Correlator
-from core.database import AlertDatabase
+from core.database import AlertDatabase, MAX_SUPPRESSION_DURATION_HOURS
 from core.engine import Alert, DetectionEngine
 from core.ingest import (
     EventParser,
@@ -26,6 +26,7 @@ MAX_QUERY_LIMIT = 10000
 DEFAULT_ALERT_LIMIT = 100
 DEFAULT_EXPORT_LIMIT = 1000
 DEFAULT_INCIDENT_LIMIT = 100
+MAX_BATCH_SIZE = 5000
 
 
 class RequestValidationError(ValueError):
@@ -266,13 +267,22 @@ class ApiWorkflows:
             'incremental ingestion supports "linux", "windows", or "macos"',
         )
         validated_path = self._validate_source_path(log_path, platform)
+        batch_size = data.get('batch_size', 500)
+        if (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or not 1 <= batch_size <= MAX_BATCH_SIZE
+        ):
+            raise RequestValidationError(
+                f'batch_size must be an integer between 1 and {MAX_BATCH_SIZE}'
+            )
         components = self.components_provider()
         service = IngestionService(
             components.database,
             components.engine,
             self._parser_for_platform(platform),
             correlator=components.correlator,
-            batch_size=data.get('batch_size', 500),
+            batch_size=batch_size,
         )
         return service.ingest_file(validated_path)
 
@@ -317,7 +327,7 @@ class ApiWorkflows:
         reason = self._reason_with_reported_by(
             data.get('reason'), data.get('author')
         )
-        if not new_state:
+        if not isinstance(new_state, str) or not new_state:
             raise RequestValidationError('state is required')
 
         database = self.components_provider().database
@@ -351,16 +361,27 @@ class ApiWorkflows:
         )
         duration_hours = data.get('duration_hours', 24)
 
-        if not fingerprint:
-            raise RequestValidationError('fingerprint is required')
+        if not fingerprint or not isinstance(fingerprint, str):
+            raise RequestValidationError('fingerprint must be a string')
         if scope not in ('global', 'host'):
             raise RequestValidationError('scope must be global or host')
-        if scope == 'host' and not scope_value:
+        if scope == 'host' and (
+            not scope_value or not isinstance(scope_value, str)
+        ):
             raise RequestValidationError(
-                'scope_value is required for host scope'
+                'scope_value must be a string and is required for host scope'
             )
         if not reason:
             raise RequestValidationError('reason is required')
+        if (
+            isinstance(duration_hours, bool)
+            or not isinstance(duration_hours, (int, float))
+            or not 0 < duration_hours <= MAX_SUPPRESSION_DURATION_HOURS
+        ):
+            raise RequestValidationError(
+                'duration_hours must be a number greater than 0 and at most '
+                f'{MAX_SUPPRESSION_DURATION_HOURS}'
+            )
 
         database = self.components_provider().database
         suppression_id = database.add_suppression(
@@ -387,6 +408,8 @@ class ApiWorkflows:
         log_path = data.get('log_path')
         if not platform or not log_path:
             raise RequestValidationError('platform and log_path are required')
+        if not isinstance(platform, str) or not isinstance(log_path, str):
+            raise RequestValidationError('platform and log_path must be strings')
         if platform not in SUPPORTED_PLATFORMS:
             raise RequestValidationError(platform_error)
         return platform, log_path

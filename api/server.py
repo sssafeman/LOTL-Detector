@@ -198,7 +198,7 @@ def _register_request_hooks(app: Flask) -> None:
         logger.error(f"Internal error: {error}")
         return jsonify({
             'error': 'Internal server error',
-            'message': str(error),
+            'message': 'Internal server error; see server logs',
         }), 500
 
 

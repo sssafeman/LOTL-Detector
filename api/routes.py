@@ -14,6 +14,23 @@ from core.export import format_records
 ViewFunction = Callable[..., ResponseReturnValue]
 
 
+def _json_body() -> dict:
+    """Parse the request body as a JSON object or raise a client error.
+
+    request.get_json() raised werkzeug HTTP exceptions for malformed
+    bodies, which surfaced as 500s (finding E14). Parse silently and
+    return stable 400 messages instead.
+    """
+    payload = request.get_json(silent=True)
+    if payload is None:
+        if not request.get_data(cache=True).strip():
+            raise RequestValidationError("Request body is required")
+        raise RequestValidationError("Request body must be valid JSON")
+    if not isinstance(payload, dict):
+        raise RequestValidationError("Request body must be a JSON object")
+    return payload
+
+
 def _passthrough(view: ViewFunction) -> ViewFunction:
     """Return an unprotected view when authentication is disabled."""
     return view
@@ -102,7 +119,7 @@ class ApiRoutes:
             self.logger.error(f"Error fetching alerts: {error}")
             return jsonify({
                 'error': 'Failed to fetch alerts',
-                'message': str(error),
+                'message': 'Internal server error; see server logs',
             }), 500
 
     def get_alert(self, alert_id: int) -> ResponseReturnValue:
@@ -116,7 +133,7 @@ class ApiRoutes:
             self.logger.error(f"Error fetching alert {alert_id}: {error}")
             return jsonify({
                 'error': 'Failed to fetch alert',
-                'message': str(error),
+                'message': 'Internal server error; see server logs',
             }), 500
 
     def export_records(self) -> ResponseReturnValue:
@@ -139,7 +156,7 @@ class ApiRoutes:
             self.logger.error(f"Error exporting records: {error}")
             return jsonify({
                 'error': 'Export failed',
-                'message': str(error),
+                'message': 'Internal server error; see server logs',
             }), 500
 
     def get_stats(self) -> ResponseReturnValue:
@@ -150,7 +167,7 @@ class ApiRoutes:
             self.logger.error(f"Error fetching stats: {error}")
             return jsonify({
                 'error': 'Failed to fetch statistics',
-                'message': str(error),
+                'message': 'Internal server error; see server logs',
             }), 500
 
     def get_rules(self) -> ResponseReturnValue:
@@ -161,14 +178,14 @@ class ApiRoutes:
             self.logger.error(f"Error fetching rules: {error}")
             return jsonify({
                 'error': 'Failed to fetch rules',
-                'message': str(error),
+                'message': 'Internal server error; see server logs',
             }), 500
 
     def scan_logs(self) -> ResponseReturnValue:
         """Scan a log source for threats."""
         try:
             return jsonify(
-                self.workflows.scan_source(request.get_json())
+                self.workflows.scan_source(_json_body())
             )
         except RequestValidationError as error:
             return jsonify({'error': str(error)}), 400
@@ -181,7 +198,7 @@ class ApiRoutes:
             self.logger.error(f"Error during scan: {error}")
             return jsonify({
                 'error': 'Scan failed',
-                'message': str(error),
+                'message': 'Internal server error; see server logs',
             }), 500
 
     def get_incidents(self) -> ResponseReturnValue:
@@ -198,14 +215,14 @@ class ApiRoutes:
             self.logger.error(f"Error fetching incidents: {error}")
             return jsonify({
                 'error': 'Failed to fetch incidents',
-                'message': str(error),
+                'message': 'Internal server error; see server logs',
             }), 500
 
     def ingest_source(self) -> ResponseReturnValue:
         """Incrementally ingest a line-oriented log source."""
         try:
             return jsonify(
-                self.workflows.ingest_source(request.get_json())
+                self.workflows.ingest_source(_json_body())
             )
         except RequestValidationError as error:
             return jsonify({'error': str(error)}), 400
@@ -218,7 +235,7 @@ class ApiRoutes:
             self.logger.error(f"Error during ingest: {error}")
             return jsonify({
                 'error': 'Ingest failed',
-                'message': str(error),
+                'message': 'Internal server error; see server logs',
             }), 500
 
     def update_alert_state(self, alert_id: int) -> ResponseReturnValue:
@@ -226,7 +243,7 @@ class ApiRoutes:
         try:
             payload = self.workflows.update_alert_state(
                 alert_id,
-                request.get_json(),
+                _json_body(),
             )
             if payload:
                 return jsonify(payload)
@@ -237,14 +254,14 @@ class ApiRoutes:
             self.logger.error(f"Error updating alert state: {error}")
             return jsonify({
                 'error': 'Failed to update state',
-                'message': str(error),
+                'message': 'Internal server error; see server logs',
             }), 500
 
     def create_suppression(self) -> ResponseReturnValue:
         """Create a new alert suppression."""
         try:
             return jsonify(
-                self.workflows.create_suppression(request.get_json())
+                self.workflows.create_suppression(_json_body())
             )
         except RequestValidationError as error:
             return jsonify({'error': str(error)}), 400
@@ -252,7 +269,7 @@ class ApiRoutes:
             self.logger.error(f"Error creating suppression: {error}")
             return jsonify({
                 'error': 'Failed to create suppression',
-                'message': str(error),
+                'message': 'Internal server error; see server logs',
             }), 500
 
     def _scope_decorator(
