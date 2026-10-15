@@ -13,7 +13,11 @@ description: |
   detection by file-based security tools.
 
 detection:
-  command_regex: "base64\\s+-d.*\\||echo.*base64.*\\|.*(bash|sh)"
+  # ReDoS-hardened (S3): bounded spans plus a tempered scan that stops at
+  # the first "base64" replace the nested ".*" groups that permitted
+  # practical CPU denial of service. Detection outcomes are preserved
+  # (see tests/test_regex_safety.py).
+  command_regex: "base64\\s+-d[^\\n]{0,320}\\||echo(?:(?!base64)[^\\n]){0,400}base64[^|]{0,160}\\|[^\\n]{0,40}(?:bash|sh)"
 
 false_positives:
   - "Legitimate deployment scripts using base64 encoding"

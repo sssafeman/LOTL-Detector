@@ -13,7 +13,10 @@ description: |
   with /bin/sh pipes, and similar shell redirection attacks.
 
 detection:
-  command_regex: "(bash|sh|nc|ncat).*(>|<).*/(tcp|udp|dev)|/bin/(ba)?sh.*0<&1|exec.*/(tcp|udp)"
+  # ReDoS-hardened (S3): bounded spans replace the nested ".*" groups
+  # that permitted practical CPU denial of service. Detection outcomes
+  # are preserved (see tests/test_regex_safety.py).
+  command_regex: "(?:bash|sh|nc|ncat)[^<>]{0,128}[<>][^\\n]{0,256}/(?:tcp|udp|dev)|/bin/(?:ba)?sh[^\\n]{0,256}0<&1|exec[^\\n]{0,256}/(?:tcp|udp)"
 
 false_positives:
   - "Rare - reverse shells are almost always malicious"
