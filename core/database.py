@@ -187,8 +187,51 @@ def _migration_1_alert_columns(cursor: sqlite3.Cursor) -> None:
 # Ordered schema migrations: (target_version, apply_function). Add new
 # migrations at the end with the next version number. Each entry runs in
 # one transaction; a failure rolls everything back and aborts startup.
+_SCORING_EVIDENCE_COLUMNS = (
+    ("risk_band", "TEXT"),
+    ("scoring_version", "INTEGER"),
+    ("severity_subscore", "INTEGER"),
+    ("confidence_subscore", "INTEGER"),
+    ("score_breakdown", "TEXT"),
+)
+
+
+def _migration_2_scoring_evidence(cursor: sqlite3.Cursor) -> None:
+    """Add and backfill the v2 scoring evidence columns.
+
+    Rows written before scoring evidence existed still have a meaningful
+    score, so derive a risk band from it instead of leaving the band NULL
+    (which exported as "low"). Those rows keep scoring_version 1 to record
+    that they predate the v2 model.
+    """
+    from core.scorer import risk_band_for_score
+
+    cursor.execute("PRAGMA table_info(alerts)")
+    existing = {row[1] for row in cursor.fetchall()}
+
+    for column_name, column_definition in _SCORING_EVIDENCE_COLUMNS:
+        if column_name in existing:
+            continue
+        cursor.execute(
+            f"ALTER TABLE alerts ADD COLUMN {column_name} {column_definition}"
+        )
+
+    cursor.execute(
+        "UPDATE alerts SET scoring_version = 1 WHERE scoring_version IS NULL"
+    )
+    rows = cursor.execute(
+        "SELECT id, score FROM alerts WHERE risk_band IS NULL"
+    ).fetchall()
+    for alert_id, score in rows:
+        cursor.execute(
+            "UPDATE alerts SET risk_band = ? WHERE id = ?",
+            (risk_band_for_score(score or 0), alert_id),
+        )
+
+
 SCHEMA_MIGRATIONS = [
     (1, _migration_1_alert_columns),
+    (2, _migration_2_scoring_evidence),
 ]
 
 
@@ -204,6 +247,17 @@ def _serialize_alert_data(alert: Alert) -> Dict[str, str]:
         "response": _serialize_json_list(alert.response),
         "event_data": json.dumps(alert.event.to_dict()),
     }
+
+
+def _serialize_scoring_evidence(alert: Alert) -> Tuple[Any, ...]:
+    """Serialize the v2 scoring evidence fields for persistence."""
+    return (
+        alert.risk_band,
+        alert.scoring_version,
+        alert.severity_subscore,
+        alert.confidence_subscore,
+        json.dumps(alert.score_breakdown) if alert.score_breakdown else None,
+    )
 
 
 def _alert_insert_values(
@@ -225,11 +279,13 @@ def _alert_insert_values(
         alert.description,
         serialized["response"],
         serialized["event_data"],
-    )
+    ) + _serialize_scoring_evidence(alert)
 
 
 def _deserialize_alert(row: sqlite3.Row) -> Dict[str, Any]:
     """Convert a stored alert row into its public dictionary shape."""
+    from core.scorer import risk_band_for_score
+
     alert = dict(row)
     alert["mitre_attack"] = (
         json.loads(alert["mitre_attack"]) if alert["mitre_attack"] else []
@@ -238,6 +294,13 @@ def _deserialize_alert(row: sqlite3.Row) -> Dict[str, Any]:
     alert["event_data"] = (
         json.loads(alert["event_data"]) if alert["event_data"] else {}
     )
+    alert["score_breakdown"] = (
+        json.loads(alert["score_breakdown"]) if alert.get("score_breakdown") else {}
+    )
+    if not alert.get("risk_band"):
+        # Rows from before scoring evidence existed, or written directly:
+        # derive the band from the score instead of leaving it empty.
+        alert["risk_band"] = risk_band_for_score(alert.get("score") or 0)
     return alert
 
 
@@ -386,8 +449,10 @@ class AlertDatabase:
             INSERT INTO alerts (
                 rule_id, rule_name, severity, score, platform,
                 process_name, command_line, user, parent_process_name,
-                timestamp, mitre_attack, description, response, event_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                timestamp, mitre_attack, description, response, event_data,
+                risk_band, scoring_version, severity_subscore,
+                confidence_subscore, score_breakdown
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, values)
 
         self.connection.commit()
@@ -464,7 +529,7 @@ class AlertDatabase:
     ):
         """Find the newest open episode matching the deduplication window."""
         cursor.execute("""
-            SELECT id, occurrence_count, first_seen, last_seen, state
+            SELECT id, occurrence_count, first_seen, last_seen, state, score
             FROM alerts
             WHERE fingerprint = ?
               AND state IN ('new', 'acknowledged', 'investigating')
@@ -489,25 +554,56 @@ class AlertDatabase:
         """Update and describe an existing deduplicated alert episode."""
         alert_id = existing[0]
         occurrence_count = existing[1] + 1
+        existing_score = existing[5] or 0
         incoming_timestamp = alert.timestamp
-        cursor.execute("""
-            UPDATE alerts
-            SET occurrence_count = occurrence_count + 1,
-                first_seen = MIN(first_seen, ?),
-                last_seen = MAX(last_seen, ?),
-                timestamp = MAX(timestamp, ?),
-                score = MAX(score, ?),
-                updated_at = CURRENT_TIMESTAMP,
-                last_event_data = ?
-            WHERE id = ?
-        """, (
-            incoming_timestamp,
-            incoming_timestamp,
-            incoming_timestamp,
-            alert.score,
-            event_data,
-            alert_id,
-        ))
+
+        if alert.score > existing_score:
+            # The incoming occurrence wins; refresh the stored evidence so
+            # the row never shows a stale band next to the higher score.
+            evidence = _serialize_scoring_evidence(alert)
+            cursor.execute("""
+                UPDATE alerts
+                SET occurrence_count = occurrence_count + 1,
+                    first_seen = MIN(first_seen, ?),
+                    last_seen = MAX(last_seen, ?),
+                    timestamp = MAX(timestamp, ?),
+                    score = ?,
+                    risk_band = ?,
+                    scoring_version = ?,
+                    severity_subscore = ?,
+                    confidence_subscore = ?,
+                    score_breakdown = ?,
+                    updated_at = CURRENT_TIMESTAMP,
+                    last_event_data = ?
+                WHERE id = ?
+            """, (
+                incoming_timestamp,
+                incoming_timestamp,
+                incoming_timestamp,
+                alert.score,
+                *evidence,
+                event_data,
+                alert_id,
+            ))
+        else:
+            cursor.execute("""
+                UPDATE alerts
+                SET occurrence_count = occurrence_count + 1,
+                    first_seen = MIN(first_seen, ?),
+                    last_seen = MAX(last_seen, ?),
+                    timestamp = MAX(timestamp, ?),
+                    score = MAX(score, ?),
+                    updated_at = CURRENT_TIMESTAMP,
+                    last_event_data = ?
+                WHERE id = ?
+            """, (
+                incoming_timestamp,
+                incoming_timestamp,
+                incoming_timestamp,
+                alert.score,
+                event_data,
+                alert_id,
+            ))
         self.connection.commit()
         logger.info(
             f"Alert deduplicated: ID={alert_id}, rule={alert.rule_id}, "
@@ -546,11 +642,14 @@ class AlertDatabase:
                 rule_id, rule_name, severity, score, platform,
                 process_name, command_line, user, parent_process_name,
                 timestamp, mitre_attack, description, response, event_data,
+                risk_band, scoring_version, severity_subscore,
+                confidence_subscore, score_breakdown,
                 host, fingerprint, activity_fingerprint, fingerprint_version,
                 occurrence_count, first_seen, last_seen, state, last_event_data,
                 created_at, updated_at
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?,
                 'new', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             )
         """, values)

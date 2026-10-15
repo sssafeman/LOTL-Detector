@@ -20,6 +20,8 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib import request as urllib_request
 from urllib.error import URLError
 
+from core.scorer import risk_band_for_score
+
 logger = logging.getLogger(__name__)
 
 EXPORT_VERSION = 1
@@ -49,6 +51,20 @@ def _cef_escape_extension(value: str) -> str:
     )
 
 
+def _alert_risk_band(alert: Dict[str, Any]) -> str:
+    """Risk band for an alert record.
+
+    Trusts stored v2 scoring evidence (finding E1). Records without it
+    (legacy rows, v1 scores) get a band derived from the score instead of
+    the old hardcoded "low" default.
+    """
+    band = alert.get("risk_band")
+    scoring_version = alert.get("scoring_version") or 0
+    if band and scoring_version >= 2:
+        return band
+    return risk_band_for_score(alert.get("score") or 0)
+
+
 def _alert_fields(alert: Any) -> Dict[str, Any]:
     """
     Normalize an alert into a flat field dict.
@@ -67,7 +83,7 @@ def _alert_fields(alert: Any) -> Dict[str, Any]:
         "name": alert.get("rule_name", ""),
         "severity": alert.get("severity", ""),
         "score": alert.get("score", 0),
-        "risk_band": alert.get("risk_band", "low"),
+        "risk_band": _alert_risk_band(alert),
         "platform": alert.get("platform") or event.get("platform", ""),
         "timestamp": alert.get("timestamp", ""),
         "process_name": alert.get("process_name") or event.get("process_name", ""),
@@ -95,7 +111,8 @@ def _incident_fields(incident: Any) -> Dict[str, Any]:
         "name": incident.get("chain_name", ""),
         "severity": incident.get("severity", ""),
         "score": incident.get("score", 0),
-        "risk_band": incident.get("risk_band", "low"),
+        "risk_band": incident.get("risk_band")
+        or risk_band_for_score(incident.get("score") or 0),
         "confidence": incident.get("confidence", 0),
         "platform": incident.get("platform", ""),
         "host": incident.get("host", ""),

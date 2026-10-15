@@ -58,6 +58,21 @@ SCORE_MIN = 0
 SCORE_MAX = 150
 SCORING_VERSION = 2
 
+
+def risk_band_for_score(score: int) -> str:
+    """Map a final risk score to its band label.
+
+    Single source of truth for band thresholds, shared by the scorer,
+    storage migration backfills, and export fallbacks.
+    """
+    if score >= 120:
+        return "critical"
+    if score >= 90:
+        return "high"
+    if score >= 60:
+        return "medium"
+    return "low"
+
 # Parent context deltas: -5 to +15
 PARENT_DELTAS: Dict[str, int] = {
     "missing_telemetry": 0,
@@ -433,14 +448,8 @@ class Scorer:
 
     @staticmethod
     def _risk_band(score: int) -> str:
-        """Map final score to risk band label."""
-        if score >= 120:
-            return "critical"
-        if score >= 90:
-            return "high"
-        if score >= 60:
-            return "medium"
-        return "low"
+        """Map final score to risk band label (see risk_band_for_score)."""
+        return risk_band_for_score(score)
 
     @staticmethod
     def _clamp(value: int, minimum: int, maximum: int) -> int:
