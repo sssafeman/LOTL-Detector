@@ -264,17 +264,23 @@ def format_records(records: List[Any], fmt: str) -> List[str]:
 
 
 class ExportSink:
-    """Base sink interface. Subclasses implement emit(line)."""
+    """Base sink interface. Subclasses implement emit(line, fmt)."""
 
-    def emit(self, line: str) -> bool:
-        """Deliver one formatted line. Returns True on success."""
+    def emit(self, line: str, fmt: str = "json") -> bool:
+        """Deliver one formatted line. Returns True on success.
+
+        Args:
+            line: The formatted record.
+            fmt: The payload format the line was rendered in ("json" or
+                "cef"), so transports can label payloads correctly (E20).
+        """
         raise NotImplementedError
 
     def export(self, records: List[Any], fmt: str) -> int:
         """Format and emit all records. Returns the number delivered."""
         delivered = 0
         for line in format_records(records, fmt):
-            if self.emit(line):
+            if self.emit(line, fmt):
                 delivered += 1
         return delivered
 
@@ -285,7 +291,7 @@ class FileSink(ExportSink):
     def __init__(self, path: str):
         self.path = path
 
-    def emit(self, line: str) -> bool:
+    def emit(self, line: str, fmt: str = "json") -> bool:
         with open(self.path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
         return True
@@ -294,7 +300,7 @@ class FileSink(ExportSink):
 class StdoutSink(ExportSink):
     """Write formatted records to stdout."""
 
-    def emit(self, line: str) -> bool:
+    def emit(self, line: str, fmt: str = "json") -> bool:
         print(line)
         return True
 
@@ -329,7 +335,7 @@ class SyslogSink(ExportSink):
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._socket.sendto(payload, (self.host, self.port))
 
-    def emit(self, line: str) -> bool:
+    def emit(self, line: str, fmt: str = "json") -> bool:
         message = f"<{self.priority}>{line}"
         try:
             self._send(message.encode("utf-8"))
@@ -370,6 +376,12 @@ class WebhookSink(ExportSink):
         self._transport = transport
         self._sleep = sleep
 
+    # Payload format to Content-Type mapping (E20).
+    CONTENT_TYPES = {
+        "json": "application/json",
+        "cef": "text/plain; charset=utf-8",
+    }
+
     def _post(self, data: bytes, headers: Dict[str, str]) -> int:
         if self._transport is not None:
             return self._transport(self.url, data, headers)
@@ -379,9 +391,10 @@ class WebhookSink(ExportSink):
         with urllib_request.urlopen(req, timeout=self.timeout) as resp:
             return resp.getcode()
 
-    def emit(self, line: str) -> bool:
+    def emit(self, line: str, fmt: str = "json") -> bool:
         data = line.encode("utf-8")
-        headers = {"Content-Type": "application/json"}
+        content_type = self.CONTENT_TYPES.get(str(fmt).lower(), "application/json")
+        headers = {"Content-Type": content_type}
         attempt = 0
         while attempt <= self.max_retries:
             try:

@@ -193,6 +193,37 @@ class TestSinks:
         )
         assert sink.emit('{"a":1}') is False
 
+    def test_webhook_content_type_matches_json_payload(self):
+        seen = []
+
+        def capture(url, data, headers):
+            seen.append((data, headers))
+            return 200
+
+        sink = WebhookSink("http://siem.local/hook", transport=capture)
+        assert sink.export([make_alert()], "json") == 1
+        body, headers = seen[0]
+        assert headers["Content-Type"] == "application/json"
+        # The body is valid JSON in this content type.
+        json.loads(body.decode("utf-8"))
+
+    def test_webhook_content_type_matches_cef_payload(self):
+        seen = []
+
+        def capture(url, data, headers):
+            seen.append((data, headers))
+            return 200
+
+        sink = WebhookSink("http://siem.local/hook", transport=capture)
+        assert sink.export([make_alert()], "cef") == 1
+        body, headers = seen[0]
+        assert headers["Content-Type"] == "text/plain; charset=utf-8"
+        assert body.decode("utf-8").startswith("CEF:")
+
+    def test_local_sinks_accept_format_parameter(self, capsys):
+        assert StdoutSink().emit("plain line", "cef") is True
+        assert "plain line" in capsys.readouterr().out
+
     def test_build_sink_types(self):
         assert isinstance(build_sink({"type": "stdout"}), StdoutSink)
         assert isinstance(build_sink({"type": "file", "path": "/tmp/x.log"}), FileSink)
