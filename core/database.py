@@ -3,7 +3,7 @@
 import json
 import logging
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -157,6 +157,36 @@ _VALID_ALERT_STATES = frozenset({
     "resolved",
     "false_positive",
 })
+
+# Upper bound for suppression durations: 10 years. Longer windows are
+# almost always a mistake and deserve an explicit rejection.
+MAX_SUPPRESSION_DURATION_HOURS = 87600
+
+
+def _as_utc(value: Any) -> Optional[datetime]:
+    """Interpret a stored timestamp as an aware UTC datetime.
+
+    SQLite CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS" (naive UTC)
+    while the datetime adapter writes isoformat ("...T...+00:00"). Both
+    mean UTC; only the serialization differs. Returns None for values
+    that cannot be parsed, so callers can fail safe.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, (str, bytes)):
+        text = value.decode("utf-8") if isinstance(value, bytes) else value
+        try:
+            parsed = datetime.fromisoformat(text.replace(" ", "T"))
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _migration_1_alert_columns(cursor: sqlite3.Cursor) -> None:
@@ -780,20 +810,38 @@ class AlertDatabase:
     def _is_suppressed(
         self, fingerprint: str, activity_fingerprint: str, host: str
     ) -> bool:
-        """Check if a fingerprint is actively suppressed."""
+        """Check if a fingerprint is actively suppressed.
+
+        Time comparisons run in Python on parsed instants. Comparing the
+        two stored timestamp formats as text against CURRENT_TIMESTAMP
+        misorders them ("T" sorts after a space), which kept expired
+        suppressions active for the rest of the UTC day (finding E3).
+        """
+        now = datetime.now(timezone.utc)
         cursor = self.connection.cursor()
         cursor.execute("""
-            SELECT id FROM suppressions
+            SELECT id, starts_at, expires_at FROM suppressions
             WHERE active = 1
-              AND starts_at <= CURRENT_TIMESTAMP
-              AND expires_at > CURRENT_TIMESTAMP
               AND (
                   (scope = 'global' AND fingerprint = ?)
                   OR
                   (scope = 'host' AND fingerprint = ? AND scope_value = ?)
               )
         """, (activity_fingerprint, fingerprint, host))
-        return cursor.fetchone() is not None
+
+        for row in cursor.fetchall():
+            suppression_id, starts_at, expires_at = row
+            starts = _as_utc(starts_at)
+            expires = _as_utc(expires_at)
+            if starts is None or expires is None:
+                logger.warning(
+                    f"Suppression {suppression_id} has unreadable "
+                    f"timestamps; treating it as inactive"
+                )
+                continue
+            if starts <= now < expires:
+                return True
+        return False
 
     def add_suppression(
         self, fingerprint: str, scope: str, scope_value: Optional[str],
@@ -814,8 +862,22 @@ class AlertDatabase:
 
         Returns:
             Suppression ID
+
+        Raises:
+            ValueError: If duration_hours is not a positive, bounded number
         """
-        from datetime import datetime, timedelta, timezone
+        if isinstance(duration_hours, bool) or not isinstance(
+            duration_hours, (int, float)
+        ):
+            raise ValueError(
+                f"duration_hours must be a number, got: {duration_hours!r}"
+            )
+        if not 0 < duration_hours <= MAX_SUPPRESSION_DURATION_HOURS:
+            raise ValueError(
+                "duration_hours must be greater than 0 and at most "
+                f"{MAX_SUPPRESSION_DURATION_HOURS}"
+            )
+
         expires = datetime.now(timezone.utc) + timedelta(hours=duration_hours)
         cursor = self.connection.cursor()
         cursor.execute("""
