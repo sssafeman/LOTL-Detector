@@ -317,12 +317,13 @@ def test_integration_cron_persistence_rule():
 
     event = collector.parse_event(raw_event)
 
-    # Run detection - note: may not trigger if user is whitelisted
-    # This test verifies the parsing works correctly
+    # Run detection: uid=1002 is not the whitelisted root user, so the
+    # cron persistence rule must fire (T1: this used to assert >= 0).
     alerts = engine.match_event(event)
 
-    # The rule should match (uid=1002, not root)
-    assert len(alerts) >= 0  # May or may not alert depending on whitelist
+    assert len(alerts) == 1
+    assert alerts[0].rule_id == 'LNX-003'
+    assert alerts[0].severity == 'high'
 
 
 def test_benign_curl_no_alert():

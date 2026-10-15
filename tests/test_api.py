@@ -120,9 +120,10 @@ def test_get_alerts_by_severity(client, sample_alerts):
 
     data = response.get_json()
     assert 'alerts' in data
-    # Should have at least one high severity alert
-    if data['count'] > 0:
-        assert all(a['severity'] == 'high' for a in data['alerts'])
+    # Exactly one of the five fixture alerts is high severity (T1: this
+    # assertion used to be guarded by "if count > 0" and proved nothing).
+    assert data['count'] == 1
+    assert all(a['severity'] == 'high' for a in data['alerts'])
 
 
 def test_get_alerts_by_platform(client, sample_alerts):
@@ -131,8 +132,9 @@ def test_get_alerts_by_platform(client, sample_alerts):
     assert response.status_code == 200
 
     data = response.get_json()
-    if data['count'] > 0:
-        assert all(a['platform'] == 'windows' for a in data['alerts'])
+    # Three of the five fixture alerts are windows (T1).
+    assert data['count'] == 3
+    assert all(a['platform'] == 'windows' for a in data['alerts'])
 
 
 def test_get_alerts_by_min_score(client, sample_alerts):
@@ -141,8 +143,9 @@ def test_get_alerts_by_min_score(client, sample_alerts):
     assert response.status_code == 200
 
     data = response.get_json()
-    if data['count'] > 0:
-        assert all(a['score'] >= 100 for a in data['alerts'])
+    # Two fixture alerts have score >= 100 (T1).
+    assert data['count'] == 2
+    assert all(a['score'] >= 100 for a in data['alerts'])
 
 
 def test_get_single_alert(client, sample_alerts):
@@ -261,14 +264,12 @@ def test_scan_valid_request(client):
         'log_path': log_path
     })
 
-    # Should succeed or fail gracefully
-    assert response.status_code in [200, 400, 500]
+    assert response.status_code == 200
 
-    if response.status_code == 200:
-        data = response.get_json()
-        assert 'events_processed' in data
-        assert 'alerts_generated' in data
-        assert 'results' in data
+    data = response.get_json()
+    assert data['events_processed'] > 0
+    assert data['alerts_generated'] >= 1
+    assert data['results']
 
 
 def test_scan_linux_logs(client):
@@ -276,16 +277,15 @@ def test_scan_linux_logs(client):
     # Use Linux fixture
     log_path = 'tests/fixtures/linux/malicious_curl.log'
 
-    if os.path.exists(log_path):
-        response = client.post('/api/scan', json={
-            'platform': 'linux',
-            'log_path': log_path
-        })
+    response = client.post('/api/scan', json={
+        'platform': 'linux',
+        'log_path': log_path
+    })
 
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data['events_processed'] >= 0
-        assert 'alerts_generated' in data
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['events_processed'] == 1
+    assert data['alerts_generated'] >= 1
 
 
 def test_scan_macos_ndjson(client):
