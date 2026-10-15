@@ -192,6 +192,8 @@ class ApiRoutes:
                 'count': len(incidents),
                 'incidents': incidents,
             })
+        except RequestValidationError as error:
+            return jsonify({'error': str(error)}), 400
         except Exception as error:
             self.logger.error(f"Error fetching incidents: {error}")
             return jsonify({

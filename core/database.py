@@ -997,6 +997,19 @@ class AlertDatabase:
         logger.debug(f"Retrieved {len(alerts)} alerts from database")
         return alerts
 
+    def get_alert_by_id(self, alert_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch one alert by primary key with a direct lookup.
+
+        A primary-key read has no scan window, so IDs outside the most
+        recent page of results still resolve (finding E13).
+        """
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return _deserialize_alert(row)
+
     def get_alerts_by_severity(self, severity: str) -> List[Dict[str, Any]]:
         """
         Get all alerts of a specific severity level

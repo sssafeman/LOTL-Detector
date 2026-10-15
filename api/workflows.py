@@ -21,10 +21,78 @@ from core.ingest import (
 from core.source_validator import SourceValidationError, validate_log_source
 
 SUPPORTED_PLATFORMS = ('windows', 'linux', 'macos')
+VALID_SEVERITIES = ('critical', 'high', 'medium', 'low')
+MAX_QUERY_LIMIT = 10000
+DEFAULT_ALERT_LIMIT = 100
+DEFAULT_EXPORT_LIMIT = 1000
+DEFAULT_INCIDENT_LIMIT = 100
 
 
 class RequestValidationError(ValueError):
     """Represent a client input error with an API-safe message."""
+
+
+def _parse_int_parameter(
+    args: Any,
+    name: str,
+    *,
+    default: Optional[int] = None,
+    minimum: Optional[int] = None,
+    maximum: Optional[int] = None,
+) -> Optional[int]:
+    """Parse an integer query parameter, rejecting unusable values.
+
+    Werkzeug's args.get(type=int) silently returns None on bad input,
+    which dropped the filter instead of telling the client (E13).
+    """
+    raw = args.get(name)
+    if raw is None or raw == '':
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise RequestValidationError(f'{name} must be an integer')
+    if minimum is not None and value < minimum:
+        raise RequestValidationError(f'{name} must be at least {minimum}')
+    if maximum is not None and value > maximum:
+        raise RequestValidationError(f'{name} must be at most {maximum}')
+    return value
+
+
+def _parse_limit_parameter(args: Any, default: int) -> int:
+    """Parse and cap a result-limit parameter."""
+    value = _parse_int_parameter(
+        args, 'limit', default=default, minimum=1, maximum=MAX_QUERY_LIMIT
+    )
+    assert value is not None  # a default is always provided
+    return value
+
+
+def _parse_timestamp_parameter(args: Any, name: str) -> Optional[datetime]:
+    """Parse an ISO 8601 time bound, rejecting unparseable values."""
+    raw = args.get(name)
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        raise RequestValidationError(f'{name} must be an ISO 8601 timestamp')
+
+
+def _validate_alert_filters(args: Any) -> Tuple[Optional[str], Optional[str], Optional[int]]:
+    """Validate the filters shared by the alerts and export endpoints."""
+    severity = args.get('severity')
+    platform = args.get('platform')
+    if severity and severity not in VALID_SEVERITIES:
+        raise RequestValidationError(
+            "severity must be one of " + ", ".join(VALID_SEVERITIES)
+        )
+    if platform and platform not in SUPPORTED_PLATFORMS:
+        raise RequestValidationError(
+            "platform must be one of " + ", ".join(SUPPORTED_PLATFORMS)
+        )
+    min_score = _parse_int_parameter(args, 'min_score', minimum=0)
+    return severity, platform, min_score
 
 
 @dataclass(frozen=True)
@@ -46,45 +114,45 @@ class ApiWorkflows:
     logger: logging.Logger
 
     def query_alerts(self, args: Any) -> list[Dict[str, Any]]:
-        """Apply alert query parameters using the API's filter precedence."""
-        database = self.components_provider().database
-        start_time = args.get('start_time')
-        end_time = args.get('end_time')
-        if start_time:
-            start_time = datetime.fromisoformat(start_time)
-        if end_time:
-            end_time = datetime.fromisoformat(end_time)
+        """Apply every supplied filter as an intersection (finding E13).
 
-        severity = args.get('severity')
-        platform = args.get('platform')
-        min_score = args.get('min_score', type=int)
-        limit = args.get('limit', type=int, default=100)
-        if severity:
-            return database.get_alerts_by_severity(severity)
-        if platform:
-            return database.get_alerts_by_platform(platform)
-        if min_score is not None:
-            return database.get_high_score_alerts(min_score)
+        Time bounds, severity, platform, min_score, and limit all apply
+        together, with the same semantics as the export endpoint. The
+        old code returned early on the first filter it saw and dropped
+        the rest.
+        """
+        database = self.components_provider().database
+        severity, platform, min_score = _validate_alert_filters(args)
         return database.get_alerts(
-            start_time=start_time,
-            end_time=end_time,
-            limit=limit,
+            start_time=_parse_timestamp_parameter(args, 'start_time'),
+            end_time=_parse_timestamp_parameter(args, 'end_time'),
+            severity=severity,
+            platform=platform,
+            min_score=min_score,
+            limit=_parse_limit_parameter(args, DEFAULT_ALERT_LIMIT),
         )
 
     def query_export_records(
         self, args: Any
     ) -> Tuple[list[Dict[str, Any]], str]:
-        """Load and filter records for the export endpoint."""
+        """Load records for the export endpoint with one query semantics.
+
+        Filters run in the database query and the limit applies after
+        filtering (E13). The old code loaded the newest N records first
+        and filtered them in Python, so matching older records were
+        silently dropped from exports.
+        """
         database = self.components_provider().database
         kind = args.get('kind', 'alerts')
-        output_format = args.get('format', 'json')
-        if output_format.lower() not in ('cef', 'json'):
+        output_format = (args.get('format') or 'json').lower()
+        if output_format not in ('cef', 'json'):
             raise RequestValidationError("format must be 'cef' or 'json'")
+        if kind not in ('alerts', 'incidents'):
+            raise RequestValidationError("kind must be 'alerts' or 'incidents'")
 
-        severity = args.get('severity')
-        platform = args.get('platform')
-        min_score = args.get('min_score', type=int)
-        limit = args.get('limit', type=int, default=1000)
+        severity, platform, min_score = _validate_alert_filters(args)
+        limit = _parse_limit_parameter(args, DEFAULT_EXPORT_LIMIT)
+
         if kind == 'incidents':
             records = database.get_incidents(
                 severity=severity,
@@ -92,34 +160,23 @@ class ApiWorkflows:
                 min_score=min_score,
                 limit=limit,
             )
-            return records, output_format
-
-        records = database.get_alerts(limit=limit)
-        if severity:
-            records = [
-                record for record in records
-                if record.get('severity') == severity
-            ]
-        if platform:
-            records = [
-                record for record in records
-                if record.get('platform') == platform
-            ]
-        if min_score is not None:
-            records = [
-                record for record in records
-                if record.get('score', 0) >= min_score
-            ]
+        else:
+            records = database.get_alerts(
+                severity=severity,
+                platform=platform,
+                min_score=min_score,
+                limit=limit,
+            )
         return records, output_format
 
     def find_alert(self, alert_id: int) -> Optional[Dict[str, Any]]:
-        """Find one alert using the existing bounded database query."""
+        """Fetch one alert directly by primary key (finding E13).
+
+        The old lookup scanned only the latest 10000 alerts, so any
+        older ID read as not found.
+        """
         database = self.components_provider().database
-        alerts = database.get_alerts(limit=10000)
-        return next(
-            (alert for alert in alerts if alert['id'] == alert_id),
-            None,
-        )
+        return database.get_alert_by_id(alert_id)
 
     def stats_payload(self) -> Dict[str, Any]:
         """Build the combined database and rule statistics payload."""
@@ -190,14 +247,14 @@ class ApiWorkflows:
         }
 
     def query_incidents(self, args: Any) -> list[Dict[str, Any]]:
-        """Apply incident query parameters to the database query."""
+        """Apply incident query parameters with validated values."""
         database = self.components_provider().database
         return database.get_incidents(
             chain_id=args.get('chain_id'),
             severity=args.get('severity'),
             platform=args.get('platform'),
-            min_score=args.get('min_score', type=int),
-            limit=args.get('limit', type=int, default=100),
+            min_score=_parse_int_parameter(args, 'min_score', minimum=0),
+            limit=_parse_limit_parameter(args, DEFAULT_INCIDENT_LIMIT),
         )
 
     def ingest_source(
