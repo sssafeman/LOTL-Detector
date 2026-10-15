@@ -2,17 +2,21 @@
 REST API server for LOTL Detection Framework
 
 Security: Bearer API key auth, restricted CORS, loopback binding.
-All endpoints except /api/health require authentication.
+All endpoints except /api/health require authentication. Startup is
+refused when no valid credentials are configured unless the explicit,
+loopback-only demo bypass (LOTL_ALLOW_UNAUTHENTICATED) is set.
 """
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from api.auth import KeyStore
+from api.auth import CredentialConfigurationError, KeyStore, MIN_KEY_LENGTH
 from api.routes import register_routes as register_api_routes
+from api.startup import StartupError
 from api.workflows import (
     ApiComponents,
     ApiWorkflows,
@@ -74,7 +78,11 @@ def _load_application_config(app: Flask) -> None:
 
 
 def _build_key_store(app: Flask) -> Optional[KeyStore]:
-    """Resolve the configured API key source using documented precedence."""
+    """Resolve the configured API key source using documented precedence.
+
+    Raises CredentialConfigurationError when an explicitly configured
+    source exists but yields no usable keys.
+    """
     key_store = app.config.get('API_KEY_STORE')
     if key_store is not None:
         return key_store
@@ -82,32 +90,72 @@ def _build_key_store(app: Flask) -> Optional[KeyStore]:
     api_keys = app.config.get('API_KEYS')
     api_key = app.config.get('API_KEY')
     if api_keys:
-        return KeyStore.from_records(api_keys)
+        store = KeyStore.from_records(api_keys)
+        if not len(store):
+            raise CredentialConfigurationError(
+                "API_KEYS contains no usable keys; each key needs at least "
+                f"{MIN_KEY_LENGTH} characters."
+            )
+        return store
     if api_key:
-        return KeyStore.from_single(api_key)
+        if len(str(api_key).strip()) < MIN_KEY_LENGTH:
+            raise CredentialConfigurationError(
+                f"API_KEY is shorter than {MIN_KEY_LENGTH} characters."
+            )
+        return KeyStore.from_single(str(api_key).strip())
     if not app.config.get('TESTING'):
         return KeyStore.load()
     return None
 
 
+def _unauthenticated_demo_allowed(app: Flask) -> bool:
+    """Resolve the explicit unauthenticated-demo switch.
+
+    The switch must be set deliberately: either via the app config key
+    ALLOW_UNAUTHENTICATED_DEMO or the LOTL_ALLOW_UNAUTHENTICATED env var.
+    TESTING mode (unit-test app fixtures) always counts as explicit.
+    """
+    if app.config.get('TESTING'):
+        return True
+    explicit = app.config.get('ALLOW_UNAUTHENTICATED_DEMO')
+    if explicit is None:
+        raw = os.environ.get('LOTL_ALLOW_UNAUTHENTICATED', '')
+        explicit = raw.strip().lower() in ('1', 'true', 'yes', 'on')
+    return bool(explicit)
+
+
 def _configure_authentication(app: Flask) -> Optional[KeyStore]:
-    """Configure authentication and return the active key store."""
+    """Configure authentication and return the active key store.
+
+    Refuses startup (StartupError) when no valid credentials are available
+    and the unauthenticated demo mode was not explicitly enabled.
+    """
     key_store = _build_key_store(app)
-    if key_store is None and not app.config.get('TESTING'):
-        logger.error(
-            "No API key configured. Set LOTL_API_KEY env var or run: "
-            "python -m api.auth generate"
-        )
-        logger.error(
-            "Server starting without authentication. All endpoints are unprotected."
-        )
     if key_store is not None:
+        app.config['ALLOW_UNAUTHENTICATED_DEMO'] = False
+        app.config['API_KEY_STORE'] = key_store
         logger.info(
             f"Authentication enabled with {len(key_store)} key(s): "
             f"{key_store.labels}"
         )
-    app.config['API_KEY_STORE'] = key_store
-    return key_store
+        return key_store
+
+    if not _unauthenticated_demo_allowed(app):
+        raise StartupError(
+            "No API credentials configured; refusing to start an "
+            "unprotected server. Generate a key with "
+            "'python -m api.auth generate', or set LOTL_API_KEY / "
+            "LOTL_API_KEYS_FILE. For a loopback-only demo, set "
+            "LOTL_ALLOW_UNAUTHENTICATED=1 explicitly."
+        )
+
+    app.config['ALLOW_UNAUTHENTICATED_DEMO'] = True
+    app.config['API_KEY_STORE'] = None
+    logger.warning(
+        "API authentication disabled by the explicit unauthenticated demo "
+        "switch. Every entry point must bind to a loopback address."
+    )
+    return None
 
 
 def _configure_cors(app: Flask) -> None:

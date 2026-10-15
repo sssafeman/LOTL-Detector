@@ -6,6 +6,10 @@ Static bearer API key authentication. The key is loaded from:
   2. LOTL_API_KEY_FILE file path
   3. Default file: ~/.config/lotl-detector/api.key
 
+A configured source that cannot produce a usable key is a fatal
+configuration error (CredentialConfigurationError), never a silent
+fallback to an unprotected server.
+
 Key generation: python -m api.auth generate
 """
 import os
@@ -24,6 +28,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_KEY_DIR = Path.home() / ".config" / "lotl-detector"
 DEFAULT_KEY_FILE = DEFAULT_KEY_DIR / "api.key"
 MIN_KEY_LENGTH = 32
+
+
+class CredentialConfigurationError(Exception):
+    """Raised when explicitly configured credentials cannot be used."""
+
 
 # Access scopes, from least to most privileged. admin implies scan
 # implies read, so a key granted a scope also holds the ones below it.
@@ -121,19 +130,29 @@ class KeyStore:
         Load a KeyStore from the environment.
 
         Precedence: LOTL_API_KEYS_FILE (JSON list of key records), then
-        LOTL_API_KEY (single key, all scopes). Returns None if neither is
-        set, matching the unauthenticated fallback.
+        LOTL_API_KEY (single key, all scopes), then LOTL_API_KEY_FILE, then
+        the default key file.
+
+        Returns None only when nothing is configured. A source that is
+        configured but cannot produce at least one usable key raises
+        CredentialConfigurationError so callers fail closed instead of
+        silently starting without authentication.
         """
         keys_file = os.environ.get("LOTL_API_KEYS_FILE")
         if keys_file:
             try:
                 records = json.loads(Path(keys_file).read_text())
-                store = cls.from_records(records)
-                if len(store):
-                    return store
-                logger.error(f"No valid keys in {keys_file}")
             except Exception as e:
-                logger.error(f"Failed to load keys file {keys_file}: {e}")
+                raise CredentialConfigurationError(
+                    f"Failed to load keys file {keys_file}: {e}"
+                ) from e
+            store = cls.from_records(records)
+            if len(store):
+                return store
+            raise CredentialConfigurationError(
+                f"No valid keys in {keys_file}; refusing to start without "
+                f"credentials (each key needs at least {MIN_KEY_LENGTH} chars)"
+            )
 
         single = load_api_key()
         if single:
@@ -146,7 +165,12 @@ def load_api_key() -> str | None:
     Load the API key from env var, file path, or default file.
 
     Returns:
-        The API key string, or None if no key is configured.
+        The API key string, or None when no source is configured.
+
+    Raises:
+        CredentialConfigurationError: When a source is configured but
+            unusable (short key, unreadable file). Failing closed here
+            prevents a typo from silently disabling authentication.
     """
     # 1. Environment variable
     key = os.environ.get("LOTL_API_KEY")
@@ -154,7 +178,10 @@ def load_api_key() -> str | None:
         key = key.strip()
         if len(key) >= MIN_KEY_LENGTH:
             return key
-        logger.warning(f"LOTL_API_KEY is shorter than {MIN_KEY_LENGTH} chars, ignoring")
+        raise CredentialConfigurationError(
+            f"LOTL_API_KEY is shorter than {MIN_KEY_LENGTH} characters; "
+            "refusing to ignore an explicitly configured key."
+        )
 
     # 2. File path from env var
     key_file_path = os.environ.get("LOTL_API_KEY_FILE")
@@ -162,12 +189,20 @@ def load_api_key() -> str | None:
         key = _read_key_file(Path(key_file_path))
         if key:
             return key
+        raise CredentialConfigurationError(
+            f"Could not read a usable API key from LOTL_API_KEY_FILE: "
+            f"{key_file_path}"
+        )
 
     # 3. Default file
     if DEFAULT_KEY_FILE.exists():
         key = _read_key_file(DEFAULT_KEY_FILE)
         if key:
             return key
+        raise CredentialConfigurationError(
+            f"Default API key file {DEFAULT_KEY_FILE} exists but has no "
+            "usable key; remove or regenerate it."
+        )
 
     return None
 
