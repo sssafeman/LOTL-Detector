@@ -27,6 +27,7 @@ from collectors.linux.collector import LinuxCollector
 from collectors.macos.collector import MacOSCollector
 from collectors.windows.collector import WindowsCollector
 from core.config import (
+    ConfigurationError,
     get_config,
     get_database_path,
     get_logging_config,
@@ -72,6 +73,10 @@ def _load_application_config(app: Flask) -> None:
             'ALLOWED_LOG_ROOTS': scan_config.get('allowed_roots', []),
             'MAX_FILE_SIZE_MB': scan_config.get('max_file_size_mb', 100),
         })
+    except ConfigurationError as error:
+        # A present-but-invalid configuration must abort startup instead of
+        # silently falling back to defaults (finding E16).
+        raise StartupError(f"Invalid configuration: {error}") from error
     except Exception as error:
         logger.warning(f"Failed to load config, using defaults: {error}")
         app.config.update(DEFAULT_CONFIG)
@@ -220,8 +225,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     if config:
         app.config.update(config)
 
+    level_name = str(app.config.get('LOG_LEVEL', 'INFO')).strip().upper()
+    level_value = getattr(logging, level_name, None)
+    if not isinstance(level_value, int):
+        raise StartupError(
+            f"Invalid logging level: {level_name!r}. "
+            f"Use one of: {', '.join(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])}."
+        )
     logging.basicConfig(
-        level=getattr(logging, app.config['LOG_LEVEL']),
+        level=level_value,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     key_store = _configure_authentication(app)

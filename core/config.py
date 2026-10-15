@@ -4,14 +4,17 @@ Configuration management for LOTL Detector
 This module provides centralized configuration loading with validation,
 caching, and sensible defaults.
 """
+import copy
 import os
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 
 
-# Singleton cache for configuration
-_config_cache: Optional[Dict[str, Any]] = None
+# Per-path cache for configuration
+_config_cache: Dict[str, Dict[str, Any]] = {}
+
+VALID_LOG_LEVELS = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
 
 
 # Default configuration values
@@ -45,7 +48,12 @@ class ConfigurationError(Exception):
 
 def _validate_config(config: Dict[str, Any]) -> None:
     """
-    Validate configuration values
+    Validate configuration values and structure
+
+    A section set to None is an explicit opt-out and passes validation.
+    A section set to anything else than a mapping, or values consumers
+    cannot use (boolean ports, non-string paths), raise
+    ConfigurationError (finding E16).
 
     Args:
         config: Configuration dictionary to validate
@@ -53,39 +61,99 @@ def _validate_config(config: Dict[str, Any]) -> None:
     Raises:
         ConfigurationError: If configuration is invalid
     """
-    # Validate API port
-    if 'api' in config and 'port' in config['api']:
-        port = config['api']['port']
-        if not isinstance(port, int) or port < 1 or port > 65535:
+    for section in ('database', 'rules', 'logging', 'api', 'scan'):
+        value = config.get(section)
+        if value is not None and not isinstance(value, dict):
             raise ConfigurationError(
-                f"API port must be between 1 and 65535, got: {port}"
+                f"Configuration section '{section}' must be a mapping, "
+                f"got: {type(value).__name__}"
             )
 
-    # Validate logging level
-    if 'logging' in config and 'level' in config['logging']:
-        level = config['logging']['level']
-        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-        if level.upper() not in valid_levels:
+    database = config.get('database') or {}
+    if 'path' in database and not isinstance(database['path'], str):
+        raise ConfigurationError(
+            f"Database path must be a string, got: {database['path']!r}"
+        )
+
+    api = config.get('api') or {}
+    if 'port' in api:
+        port = api['port']
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ConfigurationError(
-                f"Logging level must be one of {valid_levels}, got: {level}"
+                f"API port must be an integer between 1 and 65535, got: {port!r}"
+            )
+    if 'debug' in api and not isinstance(api['debug'], bool):
+        raise ConfigurationError(
+            f"API debug must be boolean, got: {type(api['debug']).__name__}"
+        )
+    if 'host' in api and not isinstance(api['host'], str):
+        raise ConfigurationError(
+            f"API host must be a string, got: {api['host']!r}"
+        )
+
+    logging_section = config.get('logging') or {}
+    if 'level' in logging_section:
+        level = logging_section['level']
+        if not isinstance(level, str) or level.strip().upper() not in VALID_LOG_LEVELS:
+            raise ConfigurationError(
+                f"Logging level must be one of {list(VALID_LOG_LEVELS)}, "
+                f"got: {level!r}"
+            )
+    if 'file' in logging_section and not isinstance(logging_section['file'], str):
+        raise ConfigurationError(
+            f"Logging file must be a string, got: {logging_section['file']!r}"
+        )
+
+    rules = config.get('rules') or {}
+    rules_dir = rules.get('directory')
+    if rules_dir is not None:
+        if not isinstance(rules_dir, str):
+            raise ConfigurationError(
+                f"Rules directory must be a string, got: {rules_dir!r}"
+            )
+        if (
+            rules_dir != DEFAULT_CONFIG['rules']['directory']
+            and not os.path.isdir(rules_dir)
+        ):
+            raise ConfigurationError(
+                f"Rules directory does not exist: {rules_dir}"
             )
 
-    # Validate API debug flag
-    if 'api' in config and 'debug' in config['api']:
-        debug = config['api']['debug']
-        if not isinstance(debug, bool):
+    scan = config.get('scan') or {}
+    allowed_roots = scan.get('allowed_roots')
+    if allowed_roots is not None:
+        if not isinstance(allowed_roots, list) or not all(
+            isinstance(root, str) for root in allowed_roots
+        ):
             raise ConfigurationError(
-                f"API debug must be boolean, got: {type(debug).__name__}"
+                f"scan.allowed_roots must be a list of strings, "
+                f"got: {allowed_roots!r}"
+            )
+    max_file_size = scan.get('max_file_size_mb')
+    if max_file_size is not None:
+        if (
+            isinstance(max_file_size, bool)
+            or not isinstance(max_file_size, int)
+            or max_file_size <= 0
+        ):
+            raise ConfigurationError(
+                f"scan.max_file_size_mb must be a positive integer, "
+                f"got: {max_file_size!r}"
             )
 
-    # Validate rules directory exists (if not default)
-    if 'rules' in config and 'directory' in config['rules']:
-        rules_dir = config['rules']['directory']
-        if rules_dir != DEFAULT_CONFIG['rules']['directory']:
-            if not os.path.isdir(rules_dir):
-                raise ConfigurationError(
-                    f"Rules directory does not exist: {rules_dir}"
-                )
+
+def _normalize_config(config: Dict[str, Any]) -> None:
+    """Normalize values once so every consumer sees the same form.
+
+    Logging levels are stored uppercase; the server resolves them with
+    getattr(logging, level), so a lowercase level that passed the old
+    validation crashed startup (finding E16).
+    """
+    logging_section = config.get('logging')
+    if isinstance(logging_section, dict):
+        level = logging_section.get('level')
+        if isinstance(level, str):
+            logging_section['level'] = level.strip().upper()
 
 
 def _merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -99,13 +167,13 @@ def _merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, 
     Returns:
         Merged configuration dictionary
     """
-    result = base.copy()
+    result = copy.deepcopy(base)
 
     for key, value in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = _merge_configs(result[key], value)
         else:
-            result[key] = value
+            result[key] = copy.deepcopy(value)
 
     return result
 
@@ -123,8 +191,8 @@ def load_config(config_path: str = 'config.yml') -> Dict[str, Any]:
     Raises:
         ConfigurationError: If configuration is invalid
     """
-    # Start with default configuration
-    config = DEFAULT_CONFIG.copy()
+    # Start with an independent copy of the default configuration
+    config = copy.deepcopy(DEFAULT_CONFIG)
 
     # Try to load config file if it exists
     if os.path.exists(config_path):
@@ -141,7 +209,8 @@ def load_config(config_path: str = 'config.yml') -> Dict[str, Any]:
         except Exception as e:
             raise ConfigurationError(f"Failed to load config file: {e}")
 
-    # Validate the final configuration
+    # Normalize values once, then validate the final configuration
+    _normalize_config(config)
     _validate_config(config)
 
     return config
@@ -169,16 +238,16 @@ def get_config(config_path: str = 'config.yml', reload: bool = False) -> Dict[st
         >>> db_path = config['database']['path']
         >>> api_port = config['api']['port']
     """
-    global _config_cache
+    cache_key = str(Path(config_path).resolve())
 
     # Return cached config if available and reload not requested
-    if _config_cache is not None and not reload:
-        return _config_cache
+    if cache_key in _config_cache and not reload:
+        return _config_cache[cache_key]
 
     # Load and cache configuration
-    _config_cache = load_config(config_path)
+    _config_cache[cache_key] = load_config(config_path)
 
-    return _config_cache
+    return _config_cache[cache_key]
 
 
 def reset_config_cache() -> None:
@@ -187,8 +256,7 @@ def reset_config_cache() -> None:
 
     This is primarily useful for testing to ensure a fresh config load.
     """
-    global _config_cache
-    _config_cache = None
+    _config_cache.clear()
 
 
 def get_database_path() -> str:
