@@ -17,6 +17,7 @@ import hmac
 import json
 import secrets
 import logging
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from functools import wraps
@@ -221,28 +222,90 @@ def _read_key_file(path: Path) -> str | None:
         return None
 
 
-def generate_api_key(output_file: Path | None = None) -> str:
+def _replace_key_file(output_file: Path, key: str) -> None:
+    """Atomically replace a key file with a fresh 0600 regular file."""
+    descriptor, temp_name = tempfile.mkstemp(
+        dir=str(output_file.parent), prefix=".api.key.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(key + "\n")
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, output_file)
+    except Exception:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
+
+
+def generate_api_key(
+    output_file: Path | None = None,
+    replace: bool = False,
+) -> str:
     """
     Generate a new cryptographically random API key.
 
+    The key file is created exclusively (O_EXCL): an existing file is
+    never overwritten unless replace=True is passed explicitly. Symlinks
+    are never followed or replaced. The file mode is 0600 from the first
+    open, and a missing parent directory is created with 0700; existing
+    directories keep their current permissions.
+
     Args:
-        output_file: Where to write the key. Defaults to ~/.config/lotl-detector/api.key
+        output_file: Where to write the key. Defaults to
+            ~/.config/lotl-detector/api.key
+        replace: Replace an existing regular file. Refused for symlinks.
 
     Returns:
         The generated key string.
+
+    Raises:
+        FileExistsError: When the target exists and replace is False, or
+            when the target is a symlink (even with replace=True).
     """
     key = secrets.token_urlsafe(32)
 
     if output_file is None:
         output_file = DEFAULT_KEY_FILE
+    output_file = Path(output_file)
 
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    # Create directory with 0700
-    output_file.parent.chmod(0o700)
-    # Write key with trailing newline
-    output_file.write_text(key + "\n")
-    # Set file permissions to 0600
-    output_file.chmod(0o600)
+    parent = output_file.parent
+    if not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
+        parent.chmod(0o700)
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
+    try:
+        descriptor = os.open(output_file, flags, 0o600)
+    except FileExistsError:
+        if not replace:
+            raise FileExistsError(
+                f"Key file already exists: {output_file}. Pass "
+                "replace=True (or --force on the CLI) to overwrite it."
+            ) from None
+        if output_file.is_symlink():
+            raise FileExistsError(
+                f"Refusing to replace a symlink: {output_file}"
+            ) from None
+        _replace_key_file(output_file, key)
+        logger.info(f"API key generated and replaced {output_file}")
+        return key
+
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(key + "\n")
+    except Exception:
+        try:
+            output_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
     logger.info(f"API key generated and saved to {output_file}")
     return key
@@ -363,8 +426,9 @@ def main():
     """
     CLI for key management.
 
-      python -m api.auth generate
-          Write a single all-scope key to the default key file.
+      python -m api.auth generate [--output PATH] [--force]
+          Write a single all-scope key. Refuses to overwrite an existing
+          key file unless --force is passed.
 
       python -m api.auth record --label reader --scopes read scan
           Print a JSON key record for a keys file (LOTL_API_KEYS_FILE).
@@ -372,8 +436,30 @@ def main():
     import sys
     argv = sys.argv[1:]
     if argv and argv[0] == "generate":
-        key = generate_api_key()
-        print(f"API key generated and saved to {DEFAULT_KEY_FILE}")
+        import argparse
+        parser = argparse.ArgumentParser(prog="api.auth generate")
+        parser.add_argument(
+            "--output",
+            default=None,
+            help=(
+                "Path for the key file "
+                f"(default: {DEFAULT_KEY_FILE})"
+            ),
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Replace the key file if it already exists",
+        )
+        args = parser.parse_args(argv[1:])
+        output_path = Path(args.output) if args.output else None
+        try:
+            key = generate_api_key(output_path, replace=args.force)
+        except FileExistsError as error:
+            print(f"Error: {error}", file=sys.stderr)
+            raise SystemExit(1)
+        saved_to = output_path if output_path else DEFAULT_KEY_FILE
+        print(f"API key generated and saved to {saved_to}")
         print(f"Key length: {len(key)} characters")
         print("Store this key securely. Use it in the Authorization header:")
         print("  Authorization: Bearer <your-key>")
