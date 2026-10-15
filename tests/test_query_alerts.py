@@ -1,8 +1,10 @@
 """
 Tests for query_alerts.py - Alert query tool
 """
+import json
 import pytest
 import os
+import subprocess
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,6 +23,53 @@ from query_alerts import (
 from core.database import AlertDatabase
 from core.engine import Alert
 from collectors.base import Event
+
+REPO_ROOT = Path(__file__).parent.parent
+
+
+def _make_alert(rule_id, severity, score, platform="linux", minute=0):
+    """Build a fully populated Alert for database integration tests."""
+    event = Event(
+        timestamp=datetime(2026, 10, 15, 12, minute, 0),
+        platform=platform,
+        process_name="bash",
+        command_line=f"cmd {rule_id}",
+        user="testuser",
+        process_id=1234,
+    )
+    return Alert(
+        rule_id=rule_id,
+        rule_name=f"Rule {rule_id}",
+        severity=severity,
+        event=event,
+        timestamp=event.timestamp,
+        mitre_attack=["T1000"],
+        description="test alert",
+        response=["test response"],
+        score=score,
+    )
+
+
+def _populate_db(tmp_path):
+    """Create a database with three alerts across severities/platforms."""
+    db_path = tmp_path / "alerts.db"
+    db = AlertDatabase(str(db_path))
+    db.save_alert(_make_alert("LNX-001", "critical", 95, "linux", minute=1))
+    db.save_alert(_make_alert("LNX-005", "high", 70, "linux", minute=2))
+    db.save_alert(_make_alert("WIN-001", "high", 105, "windows", minute=3))
+    db.close()
+    return db_path
+
+
+def _run_cli(*args):
+    """Run query_alerts.py as a subprocess from the repository root."""
+    return subprocess.run(
+        [sys.executable, str(REPO_ROOT / "query_alerts.py"), *args],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        timeout=60,
+    )
 
 
 class TestTimeframeParsing:
@@ -168,24 +217,44 @@ class TestSeverityColors:
 class TestDatabaseQuerying:
     """Tests for database querying functionality"""
 
-    @pytest.mark.skip(reason="Database querying tests require complex Alert object creation")
-    def test_database_queries(self):
+    def test_get_alerts_filter_semantics(self, tmp_path):
         """
-        Database querying tests are skipped in favor of integration tests.
+        Filters intersect and apply before the limit (E15).
 
-        These tests would require creating full Alert objects with all required
-        parameters (timestamp, description, response, etc.), which makes them
-        complex. The database querying functionality is tested through integration
-        tests when running the demo_detector.py tool.
-
-        Key querying features validated elsewhere:
-        - Severity filtering
-        - Platform filtering
-        - Score filtering
-        - Time range filtering
-        - Result limiting
+        These were previously skipped; the CLI crash root cause was that
+        AlertDatabase.get_alerts did not accept severity/platform/min_score
+        filters at all.
         """
-        pass
+        db_path = _populate_db(tmp_path)
+        db = AlertDatabase(str(db_path))
+        try:
+            assert len(db.get_alerts()) == 3
+
+            critical = db.get_alerts(severity="critical")
+            assert [a["rule_id"] for a in critical] == ["LNX-001"]
+
+            linux = db.get_alerts(platform="linux")
+            assert {a["rule_id"] for a in linux} == {"LNX-001", "LNX-005"}
+
+            high_score = db.get_alerts(min_score=100)
+            assert [a["rule_id"] for a in high_score] == ["WIN-001"]
+
+            combined = db.get_alerts(
+                severity="high", platform="linux", min_score=50
+            )
+            assert [a["rule_id"] for a in combined] == ["LNX-005"]
+
+            empty = db.get_alerts(min_score=200)
+            assert empty == []
+
+            assert len(db.get_alerts(limit=1)) == 1
+
+            recent = db.get_alerts(
+                start_time=datetime(2026, 10, 15, 12, 2, 0)
+            )
+            assert [a["rule_id"] for a in recent] == ["WIN-001", "LNX-005"]
+        finally:
+            db.close()
 
 
 class TestOutputFormats:
@@ -301,3 +370,75 @@ class TestOutputFormats:
         assert 'windows' in captured.out.lower() or 'Windows' in captured.out
         assert 'linux' in captured.out.lower() or 'Linux' in captured.out
         assert 'Average' in captured.out  # Score statistics
+
+
+class TestCliSubprocess:
+    """End-to-end CLI runs: filters work, failures stay clean (E15)."""
+
+    def test_severity_filter_no_longer_crashes(self, tmp_path):
+        db_path = _populate_db(tmp_path)
+        result = _run_cli("--database", str(db_path), "--severity", "critical")
+        assert result.returncode == 0
+        assert "Traceback" not in result.stderr
+        assert "LNX-001" in result.stdout
+        assert "LNX-005" not in result.stdout
+        assert "WIN-001" not in result.stdout
+
+    def test_min_score_filter(self, tmp_path):
+        db_path = _populate_db(tmp_path)
+        result = _run_cli("--database", str(db_path), "--min-score", "100")
+        assert result.returncode == 0
+        assert "WIN-001" in result.stdout
+        assert "LNX-001" not in result.stdout
+
+    def test_platform_filter(self, tmp_path):
+        db_path = _populate_db(tmp_path)
+        result = _run_cli("--database", str(db_path), "--platform", "linux")
+        assert result.returncode == 0
+        assert "LNX-001" in result.stdout
+        assert "WIN-001" not in result.stdout
+
+    def test_combined_filters_intersect(self, tmp_path):
+        db_path = _populate_db(tmp_path)
+        result = _run_cli(
+            "--database", str(db_path),
+            "--severity", "high",
+            "--platform", "linux",
+            "--min-score", "50",
+        )
+        assert result.returncode == 0
+        assert "LNX-005" in result.stdout
+        assert "WIN-001" not in result.stdout
+        assert "LNX-001" not in result.stdout
+
+    def test_timestamps_render_as_dates(self, tmp_path):
+        db_path = _populate_db(tmp_path)
+        result = _run_cli("--database", str(db_path))
+        assert result.returncode == 0
+        assert "2026-10-15 12:01:00" in result.stdout
+        # The literal strftime artifact from the old datetime bug.
+        assert "<20" not in result.stdout
+
+    def test_invalid_timeframe_fails_cleanly(self, tmp_path):
+        db_path = _populate_db(tmp_path)
+        result = _run_cli("--database", str(db_path), "--last", "24x")
+        assert result.returncode == 1
+        assert "Traceback" not in result.stderr
+        assert "Invalid timeframe" in result.stderr
+
+    def test_unreadable_database_fails_cleanly(self, tmp_path):
+        missing = tmp_path / "no-such-dir" / "alerts.db"
+        result = _run_cli("--database", str(missing))
+        assert result.returncode == 1
+        assert "Traceback" not in result.stderr
+        assert "Error" in result.stderr
+
+    def test_json_output_with_filter(self, tmp_path):
+        db_path = _populate_db(tmp_path)
+        result = _run_cli(
+            "--database", str(db_path), "--severity", "high",
+            "--format", "json",
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert {a["rule_id"] for a in data} == {"LNX-005", "WIN-001"}

@@ -719,14 +719,20 @@ class AlertDatabase:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         limit: int = 100,
+        severity: Optional[str] = None,
+        platform: Optional[str] = None,
+        min_score: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Query alerts with optional time filtering
+        Query alerts with optional intersecting filters
 
         Args:
             start_time: Include alerts after this time
             end_time: Include alerts before this time
             limit: Maximum number of alerts to return
+            severity: Include only this severity level
+            platform: Include only this platform
+            min_score: Include only alerts with score >= this value
 
         Returns:
             List of alert dictionaries
@@ -741,6 +747,18 @@ class AlertDatabase:
         if end_time:
             query_parts.append(" AND timestamp <= ?")
             params.append(end_time)
+
+        if severity:
+            query_parts.append(" AND severity = ?")
+            params.append(severity)
+
+        if platform:
+            query_parts.append(" AND platform = ?")
+            params.append(platform)
+
+        if min_score is not None:
+            query_parts.append(" AND score >= ?")
+            params.append(min_score)
 
         query_parts.append(" ORDER BY timestamp DESC LIMIT ?")
         params.append(limit)

@@ -33,6 +33,7 @@ class Colors:
     LOW = Fore.BLUE
     SUCCESS = Fore.GREEN
     INFO = Fore.CYAN
+    ERROR = Fore.RED
     RESET = Style.RESET_ALL
     BOLD = Style.BRIGHT
     DIM = Style.DIM
@@ -95,13 +96,22 @@ def truncate_string(s: str, max_length: int) -> str:
     return s[:max_length - 3] + "..."
 
 
-def format_timestamp(timestamp: str) -> str:
-    """Format ISO timestamp to human-readable format"""
+def format_timestamp(timestamp: Any) -> str:
+    """Format a stored timestamp for display.
+
+    Database rows carry real datetime values (the SQLite converter runs
+    on DATETIME columns), so handle both datetimes and ISO strings. A
+    datetime object must never fall through to strftime formatting of the
+    format spec itself.
+    """
+    if isinstance(timestamp, datetime):
+        return timestamp.strftime("%Y-%m-%d %H:%M:%S")
     try:
-        dt = datetime.fromisoformat(timestamp)
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except:
-        return timestamp
+        return datetime.fromisoformat(str(timestamp)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+    except (ValueError, TypeError):
+        return str(timestamp)
 
 
 def format_table_output(alerts: List[Dict[str, Any]], verbose: bool = False):
