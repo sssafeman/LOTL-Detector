@@ -247,6 +247,82 @@ def test_whitelist_by_path() -> None:
     assert len(engine.match_event(allowed_event)) == 1
 
 
+def test_whitelist_by_path_requires_component_prefix() -> None:
+    """Whitelist path matching is component-based, not substring (S6)."""
+    engine = _engine(
+        {"process_name": "powershell.exe"},
+        id="WIN-005",
+        severity="medium",
+        whitelist={"paths": ["C:\\Program Files\\"]},
+    )
+
+    # The listed directory and descendants stay whitelisted.
+    assert engine.match_event(
+        _event(working_directory="C:\\Program Files")
+    ) == []
+    assert engine.match_event(
+        _event(working_directory="c:\\program files\\MyApp")
+    ) == []
+
+    # Substring and suffix tricks must not whitelist (they did before S6).
+    near_misses = [
+        "C:\\Program FilesEvil",
+        "C:\\Program Filesx\\app",
+        "D:\\Program Files\\app",
+        "C:\\Users\\evil\\Program Files\\payload",
+        "/Program Files/app",
+    ]
+    for cwd in near_misses:
+        event = _event(working_directory=cwd)
+        assert len(engine.match_event(event)) == 1, f"false whitelist: {cwd}"
+
+
+def test_whitelist_by_path_preserves_posix_case() -> None:
+    """POSIX paths compare case-sensitively in whitelists (S6)."""
+    engine = _engine(
+        {"process_name": "bash"},
+        id="LNX-010",
+        platform="linux",
+        severity="low",
+        whitelist={"paths": ["/opt/company/bootstrap/"]},
+    )
+
+    exact = _event(
+        platform="linux",
+        process_name="bash",
+        command_line="bash install.sh",
+        working_directory="/opt/company/bootstrap/step1",
+    )
+    assert engine.match_event(exact) == []
+
+    wrong_case = _event(
+        platform="linux",
+        process_name="bash",
+        command_line="bash install.sh",
+        working_directory="/OPT/COMPANY/bootstrap",
+        process_id=5678,
+    )
+    assert len(engine.match_event(wrong_case)) == 1
+
+
+def test_whitelist_by_path_rejects_traversal() -> None:
+    """Working directories with '..' components are never whitelisted (S6)."""
+    engine = _engine(
+        {"process_name": "bash"},
+        id="LNX-010",
+        platform="linux",
+        severity="low",
+        whitelist={"paths": ["/opt/company/bootstrap/"]},
+    )
+    traversal = _event(
+        platform="linux",
+        process_name="bash",
+        command_line="bash x",
+        working_directory="/opt/company/bootstrap/../evil",
+    )
+    assert len(engine.match_event(traversal)) == 1
+
+
 def test_multiple_rules_match_one_event() -> None:
     """Test that one event can match multiple rules."""
     rules = [

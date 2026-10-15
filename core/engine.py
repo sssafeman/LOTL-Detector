@@ -72,6 +72,31 @@ def _process_names_match(
     ) == normalize_process_name(actual, actual_platform)
 
 
+def _split_path_components(
+    value: str, case_insensitive: bool = False
+) -> Tuple[str, ...] | None:
+    """Split a path into normalized components for comparison (S6).
+
+    Backslashes normalize to forward slashes; empty segments and '.'
+    drop out. Returns None when the path contains '..' components:
+    traversal is ambiguous without resolving against a filesystem and
+    must never count as whitelisted.
+
+    Args:
+        value: Path text from a rule whitelist or a telemetry event.
+        case_insensitive: Windows paths compare case-insensitively;
+            POSIX platforms preserve case.
+    """
+    components = []
+    for chunk in str(value).replace("\\", "/").split("/"):
+        if chunk in ("", "."):
+            continue
+        if chunk == "..":
+            return None
+        components.append(chunk.lower() if case_insensitive else chunk)
+    return tuple(components)
+
+
 def _matches_process_name(event: Event, rule: Rule) -> bool:
     """Match the event process against the configured process basename."""
     return _process_names_match(
@@ -580,17 +605,36 @@ class DetectionEngine:
         event: Event,
         whitelist: Dict[str, Any],
     ) -> bool:
-        """Check whether the working directory contains a listed path."""
+        """Check whether the working directory lies inside a listed path.
+
+        Comparison happens on normalized path components (S6), so the
+        listed directory must match as a full path prefix; substring or
+        segment-suffix matches such as /tmp/trusted-evil or
+        C:\\Users\\Program Files do not whitelist. POSIX case is
+        preserved; Windows comparisons are case-insensitive. Paths
+        containing '..' are ambiguous and never whitelisted.
+        """
         paths = whitelist.get("paths")
         if not paths or not event.working_directory:
             return False
 
-        working_directory = event.working_directory.lower()
-        if any(path.lower() in working_directory for path in paths):
-            logger.debug(
-                f"Event whitelisted by path: {event.working_directory}"
-            )
-            return True
+        case_insensitive = event.platform == "windows"
+        working_components = _split_path_components(
+            event.working_directory, case_insensitive
+        )
+        if working_components is None:
+            return False
+
+        for path in paths:
+            entry_components = _split_path_components(path, case_insensitive)
+            if not entry_components:
+                # None (ambiguous traversal) or empty after normalization.
+                continue
+            if working_components[: len(entry_components)] == entry_components:
+                logger.debug(
+                    f"Event whitelisted by path: {event.working_directory}"
+                )
+                return True
         return False
 
     def get_stats(self) -> Dict[str, Any]:
