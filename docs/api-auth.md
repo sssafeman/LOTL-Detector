@@ -46,6 +46,19 @@ Keys shorter than 32 characters are rejected. In tests the app can be
 built with `API_KEYS` (list) or `API_KEY` (single) in the config, or an
 injected `API_KEY_STORE`.
 
+## Startup behavior
+
+Startup fails closed. Without usable credentials (`LOTL_API_KEYS_FILE`,
+`LOTL_API_KEY`, `LOTL_API_KEY_FILE`, or the default key file), `run.py`
+and `api/server.py` refuse to start instead of serving unprotected
+endpoints. A configured credential source that cannot be read is a
+startup error, not a warning.
+
+For a local demo only, `LOTL_ALLOW_UNAUTHENTICATED=1` runs the API
+without authentication. Entry points refuse that bypass unless the
+server binds to a loopback address, and debug mode is refused on
+non-loopback bindings in every entry point.
+
 ## Rotation
 
 Because the key store holds several keys at once, rotation is

@@ -20,24 +20,28 @@ from pathlib import Path
 # Add project root to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
+from api.auth import CredentialConfigurationError
 from api.server import create_app
+from api.startup import StartupError, validate_startup_binding
 from core.config import get_api_config, get_database_path, get_rules_directory, get_logging_config
 
 
 def main():
     """Main entry point"""
-    # Load configuration defaults
+    # Load configuration defaults. Configuration errors are fatal: the
+    # server must not invent defaults (the old fallback could bind 0.0.0.0).
     try:
         api_config = get_api_config()
         db_path = get_database_path()
         rules_dir = get_rules_directory()
         logging_config = get_logging_config()
     except Exception as e:
-        print(f"Warning: Failed to load config, using hardcoded defaults: {e}")
-        api_config = {'host': '0.0.0.0', 'port': 5000, 'debug': False}
-        db_path = 'alerts.db'
-        rules_dir = 'rules'
-        logging_config = {'level': 'INFO'}
+        print(f"Error: failed to load configuration: {e}", file=sys.stderr)
+        print(
+            "Fix config.yml or remove it to use built-in defaults.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     parser = argparse.ArgumentParser(
         description='LOTL Detection Framework REST API Server'
@@ -96,7 +100,25 @@ def main():
     print(f"Log Level: {args.log_level}")
     print(f"=========================================\n")
 
-    app = create_app(config)
+    try:
+        app = create_app(config)
+    except (StartupError, CredentialConfigurationError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        sys.exit(1)
+
+    # Refuse unsafe bindings before any socket is opened (shared with
+    # api/server.py so every entry point enforces the same rules).
+    try:
+        validate_startup_binding(
+            args.host,
+            debug=args.debug,
+            allow_unauthenticated=bool(
+                app.config.get('ALLOW_UNAUTHENTICATED_DEMO')
+            ),
+        )
+    except StartupError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        sys.exit(1)
 
     # Run server
     try:

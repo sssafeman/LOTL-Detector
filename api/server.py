@@ -16,7 +16,7 @@ from flask_cors import CORS
 
 from api.auth import CredentialConfigurationError, KeyStore, MIN_KEY_LENGTH
 from api.routes import register_routes as register_api_routes
-from api.startup import StartupError
+from api.startup import StartupError, validate_startup_binding
 from api.workflows import (
     ApiComponents,
     ApiWorkflows,
@@ -292,16 +292,26 @@ def register_routes(
 
 # For development/testing
 if __name__ == '__main__':
-    app = create_app()
+    try:
+        app = create_app()
+    except (StartupError, CredentialConfigurationError) as error:
+        raise SystemExit(f"Error: {error}")
+
     host = app.config.get('API_HOST', '127.0.0.1')
     port = app.config.get('API_PORT', 5000)
     debug = app.config.get('API_DEBUG', False)
 
-    # Safety check: never expose debug mode on a non-loopback interface
-    if debug and host not in ('127.0.0.1', '::1', 'localhost'):
-        raise RuntimeError(
-            f"Refusing to start: debug mode cannot be enabled on {host}. "
-            f"Use 127.0.0.1 for debug mode, or disable debug for remote access."
+    # Refuse unsafe bindings before any socket is opened (shared with
+    # run.py so every entry point enforces the same rules).
+    try:
+        validate_startup_binding(
+            host,
+            debug=debug,
+            allow_unauthenticated=bool(
+                app.config.get('ALLOW_UNAUTHENTICATED_DEMO')
+            ),
         )
+    except StartupError as error:
+        raise SystemExit(f"Error: {error}")
 
     app.run(debug=debug, host=host, port=port)
