@@ -15,6 +15,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class MigrationError(RuntimeError):
+    """Raised when a database schema migration fails.
+
+    Callers must treat this as fatal: a partially migrated database can
+    lose data or serve wrong results, so startup aborts instead of
+    continuing on a best-effort schema.
+    """
+
+
 _CREATE_ALERTS_TABLE = """
     CREATE TABLE IF NOT EXISTS alerts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,7 +144,10 @@ _ALERT_COLUMNS = (
     ("last_seen", "DATETIME"),
     ("state", "TEXT DEFAULT 'new'"),
     ("last_event_data", "TEXT"),
-    ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
+    # Nullable on purpose: a non-constant default (CURRENT_TIMESTAMP) is
+    # rejected by SQLite when ALTER TABLE targets a populated table. The
+    # migration backfills existing rows instead.
+    ("updated_at", "DATETIME"),
 )
 
 _VALID_ALERT_STATES = frozenset({
@@ -145,6 +157,39 @@ _VALID_ALERT_STATES = frozenset({
     "resolved",
     "false_positive",
 })
+
+
+def _migration_1_alert_columns(cursor: sqlite3.Cursor) -> None:
+    """Add the alert episode columns introduced after the first release.
+
+    Each column is added only when missing, so databases that a previous
+    best-effort run left half migrated recover cleanly. updated_at is
+    added nullable and then backfilled, because SQLite refuses a
+    non-constant default on a populated ALTER TABLE.
+    """
+    cursor.execute("PRAGMA table_info(alerts)")
+    existing = {row[1] for row in cursor.fetchall()}
+
+    for column_name, column_definition in _ALERT_COLUMNS:
+        if column_name in existing:
+            continue
+        cursor.execute(
+            f"ALTER TABLE alerts ADD COLUMN {column_name} {column_definition}"
+        )
+
+    # Existing rows predate updated_at. Stamp them now; the exact original
+    # time is not recoverable, but a real value keeps later queries working.
+    cursor.execute(
+        "UPDATE alerts SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"
+    )
+
+
+# Ordered schema migrations: (target_version, apply_function). Add new
+# migrations at the end with the next version number. Each entry runs in
+# one transaction; a failure rolls everything back and aborts startup.
+SCHEMA_MIGRATIONS = [
+    (1, _migration_1_alert_columns),
+]
 
 
 def _serialize_json_list(values: Any) -> str:
@@ -248,7 +293,12 @@ class AlertDatabase:
         self.db_path = Path(db_path)
         self.connection = None
         self._connect()
-        self._create_schema()
+        try:
+            self._create_schema()
+        except Exception:
+            # A failed schema setup must never leave a half-ready handle.
+            self.connection.close()
+            raise
         logger.info(f"AlertDatabase initialized at {self.db_path}")
 
     def _connect(self):
@@ -265,7 +315,7 @@ class AlertDatabase:
         """Create database tables and indexes if they don't exist"""
         cursor = self.connection.cursor()
         cursor.execute(_CREATE_ALERTS_TABLE)
-        self._migrate_schema(cursor)
+        self._migrate_schema()
         statements = (
             _ALERT_INDEX_STATEMENTS
             + _SUPPRESSION_SCHEMA_STATEMENTS
@@ -278,27 +328,46 @@ class AlertDatabase:
         self.connection.commit()
         logger.debug("Database schema created/verified")
 
-    def _migrate_schema(self, cursor):
-        """Add new columns to existing alerts table if they don't exist."""
-        # Check existing columns
-        cursor.execute("PRAGMA table_info(alerts)")
-        existing_cols = {row[1] for row in cursor.fetchall()}
+    def _migrate_schema(self) -> None:
+        """Bring the database schema to the current version.
 
-        for column_name, column_definition in _ALERT_COLUMNS:
-            if column_name in existing_cols:
-                continue
-            self._add_alert_column(cursor, column_name, column_definition)
+        Every pending migration runs inside one transaction. If any step
+        fails, the whole migration rolls back and MigrationError aborts
+        startup, so callers never use a half-migrated database.
+        """
+        cursor = self.connection.cursor()
+        current_version = self.connection.execute(
+            "PRAGMA user_version"
+        ).fetchone()[0]
 
-    @staticmethod
-    def _add_alert_column(cursor, column_name: str, column_definition: str):
-        """Add one migration column while retaining best-effort migration."""
+        pending = sorted(
+            (version, migrate)
+            for version, migrate in SCHEMA_MIGRATIONS
+            if version > current_version
+        )
+        if not pending:
+            return
+
+        if self.connection.in_transaction:
+            self.connection.commit()
+
+        applied_version = current_version
         try:
-            cursor.execute(
-                f"ALTER TABLE alerts ADD COLUMN {column_name} {column_definition}"
-            )
-            logger.info(f"Added column {column_name} to alerts table")
+            self.connection.execute("BEGIN")
+            for version, migrate in pending:
+                logger.info(f"Applying schema migration {version}")
+                migrate(cursor)
+                applied_version = version
+                cursor.execute(f"PRAGMA user_version = {int(version)}")
+            self.connection.commit()
         except Exception as error:
-            logger.warning(f"Could not add column {column_name}: {error}")
+            self.connection.rollback()
+            raise MigrationError(
+                f"Database migration to version {applied_version} failed: {error}"
+            ) from error
+
+        logger.info(f"Database schema migrated from version {current_version} "
+                    f"to {pending[-1][0]}")
 
     def save_alert(self, alert: Alert) -> int:
         """
