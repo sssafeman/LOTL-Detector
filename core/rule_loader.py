@@ -5,10 +5,34 @@ import yaml
 import json
 import jsonschema
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Packaged assets resolve against the project root, never the current
+# working directory. Relative configured paths are resolved the same
+# way so behavior does not depend on where a command runs (finding E17).
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_RULES_DIR = PROJECT_ROOT / "rules"
+DEFAULT_SCHEMA_PATH = DEFAULT_RULES_DIR / "schema.json"
+
+
+class RuleLoadError(RuntimeError):
+    """Raised when a configured rules directory cannot load cleanly.
+
+    The loader refuses partial results: a missing directory, broken rule
+    files, duplicate IDs, or an empty rule set all raise instead of
+    logging and continuing with reduced detection coverage.
+    """
+
+
+def resolve_rules_dir(rules_dir) -> Path:
+    """Resolve a rules path: relative paths are relative to the project root."""
+    path = Path(rules_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
 
 
 class Rule:
@@ -79,17 +103,36 @@ class Rule:
         }
 
 
+def _find_duplicate_ids(rules: List[Rule]):
+    """Return the set of rule IDs that appear more than once."""
+    seen = set()
+    duplicates = set()
+    for rule in rules:
+        if rule.id in seen:
+            duplicates.add(rule.id)
+        seen.add(rule.id)
+    return duplicates
+
+
 class RuleLoader:
     """Loads and validates detection rules from YAML files"""
 
-    def __init__(self, schema_path: str = "rules/schema.json"):
+    def __init__(self, schema_path: Optional[str] = None):
         """
         Initialize rule loader
-        
+
         Args:
-            schema_path: Path to JSON schema file for validation
+            schema_path: Path to JSON schema file for validation.
+                Defaults to the packaged rules/schema.json; relative
+                paths resolve against the project root, not the cwd.
         """
-        self.schema_path = Path(schema_path)
+        if schema_path is None:
+            resolved = DEFAULT_SCHEMA_PATH
+        else:
+            resolved = Path(schema_path)
+            if not resolved.is_absolute():
+                resolved = PROJECT_ROOT / resolved
+        self.schema_path = resolved
         self.schema = self._load_schema()
         self.rules: List[Rule] = []
 
@@ -151,39 +194,64 @@ class RuleLoader:
     def load_rules_directory(self, rules_dir: str, platform: str = None) -> List[Rule]:
         """
         Load all rules from a directory
-        
+
         Args:
-            rules_dir: Directory containing rule files
+            rules_dir: Directory containing rule files. Relative paths
+                resolve against the project root.
             platform: Optional filter for specific platform (windows/linux/macos)
-            
+
         Returns:
             List of Rule objects
+
+        Raises:
+            FileNotFoundError: If the rules directory does not exist
+            RuleLoadError: If any rule file fails to load, IDs are
+                duplicated, or the directory contains no rule files
         """
-        rules_dir = Path(rules_dir)
-        rules = []
+        resolved_dir = resolve_rules_dir(rules_dir)
+        if not resolved_dir.is_dir():
+            raise FileNotFoundError(f"Rules directory not found: {resolved_dir}")
 
         # Find all .yml and .yaml files. Chain rules live under a
         # 'correlation' subdirectory with their own schema and loader.
-        rule_files = [
+        rule_files = sorted(
             f for f in
-            list(rules_dir.glob('**/*.yml')) + list(rules_dir.glob('**/*.yaml'))
+            list(resolved_dir.glob('**/*.yml')) + list(resolved_dir.glob('**/*.yaml'))
             if 'correlation' not in f.parts
-        ]
+        )
+        if not rule_files:
+            raise RuleLoadError(f"No rule files found in {resolved_dir}")
 
+        rules: List[Rule] = []
+        failures = []
         for rule_file in rule_files:
             try:
                 rule = self.load_rule_file(rule_file)
-
-                # Filter by platform if specified
-                if platform is None or rule.platform == platform:
-                    rules.append(rule)
-
             except Exception as e:
                 logger.error(f"Failed to load rule {rule_file}: {e}")
-                # Continue loading other rules
+                failures.append((rule_file, e))
+                continue
+
+            # Filter by platform if specified
+            if platform is None or rule.platform == platform:
+                rules.append(rule)
+
+        if failures:
+            details = "; ".join(
+                f"{path.name}: {error}" for path, error in failures
+            )
+            raise RuleLoadError(
+                f"{len(failures)} rule file(s) failed to load: {details}"
+            )
+
+        duplicates = _find_duplicate_ids(rules)
+        if duplicates:
+            raise RuleLoadError(
+                f"Duplicate rule IDs: {', '.join(sorted(duplicates))}"
+            )
 
         self.rules = rules
-        logger.info(f"Loaded {len(rules)} rules from {rules_dir}")
+        logger.info(f"Loaded {len(rules)} rules from {resolved_dir}")
         return rules
 
     def get_rule_by_id(self, rule_id: str) -> Rule:

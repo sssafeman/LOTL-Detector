@@ -21,7 +21,7 @@ init(autoreset=True)
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.rule_loader import Rule, RuleLoader
+from core.rule_loader import Rule, RuleLoader, resolve_rules_dir
 from core.engine import DetectionEngine, Alert
 from core.database import AlertDatabase
 from core.config import get_database_path, get_rules_directory
@@ -333,10 +333,10 @@ def run_correlation(all_events: List[Event], rules_dir: str, db: AlertDatabase,
     """
     from core.correlator import ChainRuleLoader, Correlator
 
-    chains_dir = str(Path(rules_dir) / "correlation")
+    chains_dir = resolve_rules_dir(rules_dir) / "correlation"
     try:
         chain_loader = ChainRuleLoader()
-        chains = chain_loader.load_chains_directory(chains_dir, platform=platform)
+        chains = chain_loader.load_chains_directory(str(chains_dir), platform=platform)
     except Exception as e:
         print_warning(f"Chain rules unavailable, correlation skipped: {e}")
         return []

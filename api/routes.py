@@ -65,6 +65,7 @@ class ApiRoutes:
             ('/api/export', 'export_records', self.export_records, ['GET'], 'read'),
             ('/api/stats', 'get_stats', self.get_stats, ['GET'], 'read'),
             ('/api/rules', 'get_rules', self.get_rules, ['GET'], 'read'),
+            ('/api/ready', 'readiness', self.readiness, ['GET'], 'read'),
             ('/api/scan', 'scan_logs', self.scan_logs, ['POST'], 'scan'),
             (
                 '/api/incidents',
@@ -99,8 +100,18 @@ class ApiRoutes:
         return self.app
 
     def health_check(self) -> ResponseReturnValue:
-        """Return the minimal public health response."""
+        """Return the minimal public health response.
+
+        This is a liveness probe only: it stays minimal in public and
+        says nothing about detection coverage. Use /api/ready for
+        readiness (finding E17).
+        """
         return jsonify({'status': 'ok'})
+
+    def readiness(self) -> ResponseReturnValue:
+        """Return readiness: 200 when the service can serve detections."""
+        payload, status = self.workflows.readiness_payload()
+        return jsonify(payload), status
 
     def get_alerts(self) -> ResponseReturnValue:
         """Return alerts with optional filtering."""

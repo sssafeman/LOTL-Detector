@@ -36,7 +36,7 @@ from core.config import (
 from core.correlator import ChainRuleLoader, Correlator
 from core.database import AlertDatabase
 from core.engine import DetectionEngine
-from core.rule_loader import RuleLoader
+from core.rule_loader import RuleLoader, RuleLoadError, resolve_rules_dir
 
 logger = logging.getLogger(__name__)
 
@@ -258,15 +258,24 @@ def _initialize_database(app: Flask) -> AlertDatabase:
 
 
 def _initialize_correlator(rules_dir: str) -> Correlator:
-    """Load chain rules, falling back to an empty correlator on failure."""
-    chains_dir = str(Path(rules_dir) / 'correlation')
-    try:
-        chains = ChainRuleLoader().load_chains_directory(chains_dir)
-    except Exception as error:
-        logger.warning(
-            f"Chain rules unavailable, correlation disabled: {error}"
+    """Load chain rules; a configured-but-broken setup aborts startup.
+
+    The old version fell back to an empty correlator and logged a
+    warning, leaving an apparently healthy service with zero chain
+    coverage (finding E17).
+    """
+    chains_dir = resolve_rules_dir(rules_dir) / 'correlation'
+    if not chains_dir.is_dir():
+        raise StartupError(
+            f"Correlation rules directory not found: {chains_dir}. "
+            "Point RULES_DIR at a complete rule set."
         )
-        chains = []
+    try:
+        chains = ChainRuleLoader().load_chains_directory(str(chains_dir))
+    except Exception as error:
+        raise StartupError(
+            f"Failed to load correlation rules: {error}"
+        ) from error
     logger.info(f"Loaded {len(chains)} chain rules")
     return Correlator(chains)
 
@@ -276,8 +285,11 @@ def initialize_components(app: Flask) -> None:
     global db, rule_loader, engine, correlator, collectors
 
     db = _initialize_database(app)
-    rule_loader = RuleLoader()
-    rules = rule_loader.load_rules_directory(app.config['RULES_DIR'])
+    try:
+        rule_loader = RuleLoader()
+        rules = rule_loader.load_rules_directory(app.config['RULES_DIR'])
+    except (FileNotFoundError, RuleLoadError) as error:
+        raise StartupError(f"Failed to load detection rules: {error}") from error
     logger.info(f"Loaded {len(rules)} detection rules")
     engine = DetectionEngine(rules)
     correlator = _initialize_correlator(app.config['RULES_DIR'])

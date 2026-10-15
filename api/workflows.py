@@ -179,6 +179,30 @@ class ApiWorkflows:
         database = self.components_provider().database
         return database.get_alert_by_id(alert_id)
 
+    def readiness_payload(self) -> Tuple[Dict[str, Any], int]:
+        """Report readiness: components loaded and usable (finding E17).
+
+        Liveness stays minimal on /api/health; this payload tells
+        orchestrators whether the service can actually serve detections
+        (rules loaded, database reachable).
+        """
+        components = self.components_provider()
+        rules_loaded = len(components.engine.rules)
+
+        database_ok = True
+        try:
+            components.database.connection.execute("SELECT 1").fetchone()
+        except Exception as error:
+            database_ok = False
+            self.logger.warning(f"Readiness database check failed: {error}")
+
+        ready = rules_loaded > 0 and database_ok
+        payload = {
+            'status': 'ready' if ready else 'not_ready',
+            'rules_loaded': rules_loaded,
+        }
+        return payload, (200 if ready else 503)
+
     def stats_payload(self) -> Dict[str, Any]:
         """Build the combined database and rule statistics payload."""
         components = self.components_provider()
