@@ -1,6 +1,7 @@
 """
 Tests for scoped API keys, rotation, and per-endpoint scope enforcement.
 """
+import sqlite3
 import tempfile
 import os
 
@@ -180,3 +181,84 @@ class TestEndpointScopeEnforcement:
         assert scoped_client.get(
             "/api/alerts", headers=_hdr(ADMIN_KEY)
         ).status_code == 200
+
+
+def _read_latest_row(client, table, columns):
+    """Read the newest row of a table from the app's database."""
+    db_path = client.application.config["DATABASE_PATH"]
+    connection = sqlite3.connect(db_path)
+    try:
+        row = connection.execute(
+            f"SELECT {', '.join(columns)} FROM {table} ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        connection.close()
+    return row
+
+
+def _scan_for_alert_id(client, key):
+    """Create alerts from fixtures and return the first alert id."""
+    response = client.post(
+        "/api/scan",
+        json={"platform": "windows", "log_path": "tests/fixtures/windows"},
+        headers=_hdr(key),
+    )
+    assert response.status_code == 200
+    response = client.get("/api/alerts", headers=_hdr(key))
+    alerts = response.get_json()["alerts"]
+    assert alerts
+    return alerts[0]["id"]
+
+
+class TestAuditActorProvenance:
+    """Audit records name the authenticated key, not caller input (S9)."""
+
+    def test_state_change_records_key_label(self, scoped_client):
+        alert_id = _scan_for_alert_id(scoped_client, ADMIN_KEY)
+        response = scoped_client.post(
+            f"/api/alerts/{alert_id}/state",
+            json={"state": "acknowledged"},
+            headers=_hdr(ADMIN_KEY),
+        )
+        assert response.status_code == 200
+        author, reason = _read_latest_row(
+            scoped_client, "alert_audit", ["author", "reason"]
+        )
+        assert author == "admin"
+        assert not reason
+
+    def test_state_change_ignores_caller_supplied_author(self, scoped_client):
+        alert_id = _scan_for_alert_id(scoped_client, ADMIN_KEY)
+        response = scoped_client.post(
+            f"/api/alerts/{alert_id}/state",
+            json={
+                "state": "resolved",
+                "author": "not-the-operator",
+                "reason": "triage",
+            },
+            headers=_hdr(ADMIN_KEY),
+        )
+        assert response.status_code == 200
+        author, reason = _read_latest_row(
+            scoped_client, "alert_audit", ["author", "reason"]
+        )
+        assert author == "admin"
+        assert reason == "triage; reported_by=not-the-operator"
+
+    def test_suppression_records_key_label(self, scoped_client):
+        response = scoped_client.post(
+            "/api/suppressions",
+            json={
+                "fingerprint": "fp-audit-test",
+                "scope": "global",
+                "reason": "known noise",
+                "author": "not-the-operator",
+            },
+            headers=_hdr(ADMIN_KEY),
+        )
+        assert response.status_code == 200
+        author, reason = _read_latest_row(
+            scoped_client, "suppressions", ["author", "reason"]
+        )
+        assert author == "admin"
+        assert reason == "known noise; reported_by=not-the-operator"

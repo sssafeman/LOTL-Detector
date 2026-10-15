@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from flask import Flask
+from flask import Flask, g, has_request_context
 
 from collectors.base import BaseCollector, Event
 from core.correlator import Correlator
@@ -219,6 +219,35 @@ class ApiWorkflows:
         )
         return service.ingest_file(validated_path)
 
+    @staticmethod
+    def _audit_actor() -> str:
+        """Return the audit actor for state and suppression changes (S9).
+
+        The actor is always the authenticated key's label, never a value
+        supplied by the caller. Unauthenticated demo mode records
+        'unauthenticated'.
+        """
+        if has_request_context():
+            label = getattr(g, 'auth_label', None)
+            if label:
+                return str(label)
+        return 'unauthenticated'
+
+    @staticmethod
+    def _reason_with_reported_by(reason: Any, reported_by: Any) -> str:
+        """Fold a caller-supplied analyst name into the reason annotation.
+
+        The supplied name is not trusted as the audit actor (S9); it is
+        kept as a clearly marked, separate annotation when present.
+        """
+        text = str(reason) if reason else ''
+        reported = str(reported_by or '').strip()
+        if not reported:
+            return text
+        if text:
+            return f"{text}; reported_by={reported}"
+        return f"reported_by={reported}"
+
     def update_alert_state(
         self, alert_id: int, data: Optional[Dict[str, Any]]
     ) -> Optional[Dict[str, Any]]:
@@ -227,8 +256,10 @@ class ApiWorkflows:
             raise RequestValidationError('Request body is required')
 
         new_state = data.get('state')
-        author = data.get('author', 'api')
-        reason = data.get('reason', '')
+        actor = self._audit_actor()
+        reason = self._reason_with_reported_by(
+            data.get('reason'), data.get('author')
+        )
         if not new_state:
             raise RequestValidationError('state is required')
 
@@ -236,7 +267,7 @@ class ApiWorkflows:
         updated = database.update_alert_state(
             alert_id,
             new_state,
-            author,
+            actor,
             reason,
         )
         if not updated:
@@ -257,8 +288,10 @@ class ApiWorkflows:
         fingerprint = data.get('fingerprint')
         scope = data.get('scope', 'global')
         scope_value = data.get('scope_value')
-        author = data.get('author', 'api')
-        reason = data.get('reason', '')
+        actor = self._audit_actor()
+        reason = self._reason_with_reported_by(
+            data.get('reason'), data.get('author')
+        )
         duration_hours = data.get('duration_hours', 24)
 
         if not fingerprint:
@@ -277,7 +310,7 @@ class ApiWorkflows:
             fingerprint,
             scope,
             scope_value,
-            author,
+            actor,
             reason,
             duration_hours,
         )
