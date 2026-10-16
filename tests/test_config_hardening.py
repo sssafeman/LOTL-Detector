@@ -155,3 +155,24 @@ def test_server_aborts_on_invalid_config_file(tmp_path, monkeypatch):
             "RULES_DIR": "rules",
             "TESTING": True,
         })
+
+
+def test_server_aborts_when_a_section_is_null(tmp_path, monkeypatch):
+    """A null section must not silently discard the rest of the config.
+
+    S2 review finding 1: `logging: null` made the whole config fall back
+    to defaults, dropping scan.allowed_roots and the configured port.
+    """
+    _write(str(tmp_path / "config.yml"), {
+        "logging": None,
+        "api": {"port": 6789},
+        "scan": {"allowed_roots": [str(tmp_path)]},
+    })
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(StartupError):
+        create_app({
+            "DATABASE_PATH": str(tmp_path / "api.db"),
+            "RULES_DIR": "rules",
+            "TESTING": True,
+        })

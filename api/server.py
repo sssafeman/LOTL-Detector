@@ -47,15 +47,6 @@ engine = None
 correlator = None
 collectors = {}
 
-DEFAULT_CONFIG = {
-    'DATABASE_PATH': 'alerts.db',
-    'RULES_DIR': 'rules',
-    'LOG_LEVEL': 'INFO',
-    'API_HOST': '127.0.0.1',
-    'API_PORT': 5000,
-    'API_DEBUG': False,
-}
-
 
 def _load_application_config(app: Flask) -> None:
     """Populate Flask configuration from the project config system."""
@@ -63,23 +54,29 @@ def _load_application_config(app: Flask) -> None:
         app_config = get_config()
         logging_config = get_logging_config()
         scan_config = app_config.get('scan', {})
+        api_config = app_config.get('api') or {}
         app.config.update({
             'DATABASE_PATH': get_database_path(),
             'RULES_DIR': get_rules_directory(),
             'LOG_LEVEL': logging_config['level'],
-            'API_HOST': app_config.get('api', {}).get('host', '127.0.0.1'),
-            'API_PORT': app_config.get('api', {}).get('port', 5000),
-            'API_DEBUG': app_config.get('api', {}).get('debug', False),
-            'ALLOWED_LOG_ROOTS': scan_config.get('allowed_roots', []),
-            'MAX_FILE_SIZE_MB': scan_config.get('max_file_size_mb', 100),
+            'API_HOST': api_config.get('host', '127.0.0.1'),
+            'API_PORT': api_config.get('port', 5000),
+            'API_DEBUG': api_config.get('debug', False),
+            'ALLOWED_LOG_ROOTS': (scan_config or {}).get('allowed_roots', []),
+            'MAX_FILE_SIZE_MB': (scan_config or {}).get('max_file_size_mb', 100),
         })
     except ConfigurationError as error:
         # A present-but-invalid configuration must abort startup instead of
         # silently falling back to defaults (finding E16).
         raise StartupError(f"Invalid configuration: {error}") from error
     except Exception as error:
-        logger.warning(f"Failed to load config, using defaults: {error}")
-        app.config.update(DEFAULT_CONFIG)
+        # Never fall back to defaults here. An accepted-but-unusable section
+        # (for example `logging: null`) previously caused a wholesale fallback
+        # that silently discarded the rest of the configuration, including
+        # scan.allowed_roots (S2 review finding 1).
+        raise StartupError(
+            f"Failed to load configuration: {error}"
+        ) from error
 
 
 def _build_key_store(app: Flask) -> Optional[KeyStore]:
