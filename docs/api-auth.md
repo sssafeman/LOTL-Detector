@@ -2,8 +2,7 @@
 
 All endpoints except `/api/health` require a bearer API key. Keys now
 carry scopes, and multiple keys can be valid at once to support rotation.
-This extends the single-key auth from the API security work
-(`docs/moa-api-security-2026-07-11.md`).
+This extends the earlier single-key authentication work.
 
 ## Scopes
 

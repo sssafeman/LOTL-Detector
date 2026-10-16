@@ -1,10 +1,10 @@
 # Score Calibration
 
-The v2 scoring weights were specified in the MoA design
-(`docs/moa-scoring-design-2026-07-11.md`) but never validated against
-labeled data. With a benign and malicious fixture corpus now covering
-all 22 atomic rules, this document records the calibration run, the
-observed distribution, and the conclusion.
+The v2 scoring weights were specified in July 2026 design notes (not
+part of this repository) but never validated against labeled data. With
+a benign and malicious fixture corpus now covering all 22 atomic rules,
+this document records the calibration run, the observed distribution,
+and the conclusion.
 
 The calibration is locked by `tests/test_score_calibration.py`: any
 weight change that shifts a rule's band fails a test naming that rule.

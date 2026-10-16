@@ -12,7 +12,7 @@ which detection shifted. Do not edit the expected bands to make a test
 pass without understanding why the score moved: the spec warns against
 tuning weights merely to reproduce a distribution.
 
-Reference: docs/score-calibration.md, docs/moa-scoring-design-2026-07-11.md.
+Reference: docs/score-calibration.md.
 """
 from pathlib import Path
 
