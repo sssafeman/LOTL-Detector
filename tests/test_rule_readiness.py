@@ -126,3 +126,37 @@ def test_ready_endpoint_reports_not_ready_without_rules(tmp_path, monkeypatch):
     response = app.test_client().get("/api/ready")
     assert response.status_code == 503
     assert response.get_json()["status"] == "not_ready"
+
+
+def test_create_app_fails_when_a_chain_file_is_broken(tmp_path):
+    """S2 review finding 2: a broken chain file must not yield a
+    running service with zero correlation coverage reporting ready."""
+    import shutil
+
+    rules_dir = tmp_path / "rules"
+    shutil.copytree(REPO_RULES, rules_dir)
+    (rules_dir / "correlation" / "broken.yml").write_text("name: broken\n")
+
+    with pytest.raises(StartupError):
+        create_app(_app_config(tmp_path, RULES_DIR=str(rules_dir)))
+
+
+def test_chain_loading_is_cwd_independent(tmp_path, monkeypatch):
+    """S2 review finding 6: chain schema resolution must not use cwd."""
+    monkeypatch.chdir(tmp_path)
+
+    from core.correlator import ChainRuleLoader
+
+    chains = ChainRuleLoader().load_chains_directory(
+        str(REPO_RULES / "correlation")
+    )
+    assert chains
+    assert all(chain.id for chain in chains)
+
+
+def test_ready_reports_chain_count(tmp_path):
+    app = create_app(_app_config(tmp_path))
+    data = app.test_client().get("/api/ready").get_json()
+
+    assert data["status"] == "ready"
+    assert data["chains_loaded"] >= 1

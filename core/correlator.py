@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 from collectors.base import Event
 from core.engine import normalize_process_name
 from core.process_tree import ProcessNode, build_forest
+from core.rule_loader import DEFAULT_RULES_DIR, PROJECT_ROOT
 from core.scorer import SEVERITY_SUBSCORES, Scorer
 import logging
 
@@ -193,8 +194,17 @@ class Incident:
 class ChainRuleLoader:
     """Loads and validates chain rules from YAML files."""
 
-    def __init__(self, schema_path: str = "rules/chain-schema.json"):
-        self.schema_path = Path(schema_path)
+    def __init__(self, schema_path: Optional[str] = None):
+        """Initialize the loader; relative schema paths resolve against
+        the project root, not the current working directory (S2 review
+        finding 6: server startup failed from any other directory)."""
+        if schema_path is None:
+            resolved = DEFAULT_RULES_DIR / "chain-schema.json"
+        else:
+            resolved = Path(schema_path)
+            if not resolved.is_absolute():
+                resolved = PROJECT_ROOT / resolved
+        self.schema_path = resolved
         with open(self.schema_path, "r") as f:
             self.schema = json.load(f)
         self.chains: List[ChainRule] = []
@@ -214,8 +224,12 @@ class ChainRuleLoader:
         """
         Load all chain rules from a directory.
 
-        Raises ValueError on duplicate chain IDs. Individual files that
-        fail validation are logged and skipped, matching RuleLoader.
+        Missing directories return an empty list (the server refuses to
+        start without a correlation directory; the demo degrades). Files
+        that fail to load are collected and raise ValueError: silently
+        skipping them left a running service with zero chain coverage
+        while /api/ready reported ready (S2 review finding 2). Duplicate
+        IDs keep the historical skip-and-log behavior.
         """
         chains_path = Path(chains_dir)
         chains: List[ChainRule] = []
@@ -229,19 +243,32 @@ class ChainRuleLoader:
         chain_files = sorted(
             list(chains_path.glob("**/*.yml")) + list(chains_path.glob("**/*.yaml"))
         )
+        failures = []
         for chain_file in chain_files:
             try:
                 chain = self.load_chain_file(chain_file)
-                if chain.id in seen_ids:
-                    raise ValueError(
-                        f"Duplicate chain ID {chain.id} in {chain_file} "
-                        f"(already defined in {seen_ids[chain.id]})"
-                    )
-                seen_ids[chain.id] = str(chain_file)
-                if platform is None or chain.platform == platform:
-                    chains.append(chain)
             except Exception as e:
                 logger.error(f"Failed to load chain rule {chain_file}: {e}")
+                failures.append((chain_file, e))
+                continue
+
+            if chain.id in seen_ids:
+                logger.error(
+                    f"Duplicate chain ID {chain.id} in {chain_file} "
+                    f"(already defined in {seen_ids[chain.id]}); skipping"
+                )
+                continue
+            seen_ids[chain.id] = str(chain_file)
+            if platform is None or chain.platform == platform:
+                chains.append(chain)
+
+        if failures:
+            details = "; ".join(
+                f"{path.name}: {error}" for path, error in failures
+            )
+            raise ValueError(
+                f"{len(failures)} chain file(s) failed to load: {details}"
+            )
 
         self.chains = chains
         logger.info(f"Loaded {len(chains)} chain rules from {chains_dir}")

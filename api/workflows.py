@@ -188,6 +188,7 @@ class ApiWorkflows:
         """
         components = self.components_provider()
         rules_loaded = len(components.engine.rules)
+        chains_loaded = len(components.correlator.chains)
 
         database_ok = True
         try:
@@ -200,6 +201,7 @@ class ApiWorkflows:
         payload = {
             'status': 'ready' if ready else 'not_ready',
             'rules_loaded': rules_loaded,
+            'chains_loaded': chains_loaded,
         }
         return payload, (200 if ready else 503)
 
