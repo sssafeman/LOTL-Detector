@@ -59,7 +59,10 @@ def _alert_risk_band(alert: Dict[str, Any]) -> str:
     the old hardcoded "low" default.
     """
     band = alert.get("risk_band")
-    scoring_version = alert.get("scoring_version") or 0
+    try:
+        scoring_version = int(alert.get("scoring_version") or 0)
+    except (TypeError, ValueError):
+        scoring_version = 0
     if band and scoring_version >= 2:
         return band
     return risk_band_for_score(alert.get("score") or 0)

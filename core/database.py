@@ -327,9 +327,16 @@ def _deserialize_alert(row: sqlite3.Row) -> Dict[str, Any]:
     alert["score_breakdown"] = (
         json.loads(alert["score_breakdown"]) if alert.get("score_breakdown") else {}
     )
-    if not alert.get("risk_band"):
-        # Rows from before scoring evidence existed, or written directly:
-        # derive the band from the score instead of leaving it empty.
+    try:
+        scoring_version = int(alert.get("scoring_version") or 0)
+    except (TypeError, ValueError):
+        scoring_version = 0
+    alert["scoring_version"] = scoring_version
+    if not alert.get("risk_band") or scoring_version < 2:
+        # Rows from before scoring evidence existed, or v1 rows whose band
+        # is only the constructor default, get a band derived from the
+        # score. This matches what export does, so the API and export
+        # cannot disagree (S2 review finding 8).
         alert["risk_band"] = risk_band_for_score(alert.get("score") or 0)
     return alert
 

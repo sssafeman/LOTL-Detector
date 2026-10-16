@@ -15,7 +15,7 @@ from collectors.base import Event
 from core.database import AlertDatabase
 from core.engine import Alert
 from core.export import to_cef, to_ecs
-from core.scorer import Scorer, risk_band_for_score
+from core.scorer import risk_band_for_score
 
 
 def _event() -> Event:
@@ -171,8 +171,52 @@ def test_migration_backfills_risk_band_for_legacy_rows(tmp_path):
         db.close()
 
 
-def test_risk_band_function_matches_scorer():
-    """The shared band function agrees with the Scorer's mapping."""
-    scorer = Scorer()
-    for score in (0, 59, 60, 89, 90, 119, 120, 150):
-        assert risk_band_for_score(score) == scorer._risk_band(score)
+def test_risk_band_thresholds_are_absolute():
+    """Pin the documented band boundaries (120/90/60) by value.
+
+    S2 review note: the previous version compared the shared function
+    with Scorer._risk_band, which is a delegate, so it proved nothing.
+    """
+    assert risk_band_for_score(0) == "low"
+    assert risk_band_for_score(59) == "low"
+    assert risk_band_for_score(60) == "medium"
+    assert risk_band_for_score(89) == "medium"
+    assert risk_band_for_score(90) == "high"
+    assert risk_band_for_score(119) == "high"
+    assert risk_band_for_score(120) == "critical"
+    assert risk_band_for_score(150) == "critical"
+
+
+def test_v1_saved_alert_band_is_consistent_between_api_and_export(temp_db):
+    """S2 review finding 8: a v1 alert with the constructor-default
+    "low" band showed low through the API while export derived critical."""
+    temp_db.save_alert(_make_alert(score=130, band="low", version=1))
+
+    stored = temp_db.get_alerts()[0]
+    assert stored["risk_band"] == "critical"
+
+    line = to_cef(stored)
+    assert _cef_severity(line) == "10"
+    assert to_ecs(stored)["lotl"]["risk_band"] == "critical"
+
+
+def test_non_numeric_scoring_version_does_not_break_export(temp_db):
+    """S2 review finding 7 (export half): an inconsistent TEXT
+    scoring_version reached export and raised TypeError comparing it
+    with int 2."""
+    cursor = temp_db.connection.cursor()
+    cursor.execute("""
+        INSERT INTO alerts (
+            rule_id, rule_name, severity, score, platform,
+            process_name, command_line, user, timestamp, scoring_version
+        ) VALUES ('WIN-001', 'Odd', 'high', 130, 'windows',
+                  'certutil.exe', 'cmd', 'user', '2026-03-01 09:30:00', 'abc')
+    """)
+    temp_db.connection.commit()
+
+    record = temp_db.get_alerts()[0]
+    assert record["scoring_version"] == 0        # coerced, not 'abc'
+    assert record["risk_band"] == "critical"     # derived from the score
+
+    line = to_cef(record)
+    assert _cef_severity(line) == "10"
