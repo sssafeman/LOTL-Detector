@@ -73,6 +73,7 @@ def risk_band_for_score(score: int) -> str:
         return "medium"
     return "low"
 
+
 # Parent context deltas: -5 to +15
 PARENT_DELTAS: Dict[str, int] = {
     "missing_telemetry": 0,
