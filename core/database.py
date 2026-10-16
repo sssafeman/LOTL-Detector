@@ -990,8 +990,13 @@ class AlertDatabase:
             query_parts.append(" AND score >= ?")
             params.append(min_score)
 
-        query_parts.append(" ORDER BY timestamp DESC LIMIT ?")
-        params.append(limit)
+        if limit is not None:
+            query_parts.append(" ORDER BY timestamp DESC LIMIT ?")
+            params.append(limit)
+        else:
+            # Callers such as the CLI's unlimited mode pass None; omitting
+            # the clause avoids SQLite's datatype mismatch on LIMIT NULL.
+            query_parts.append(" ORDER BY timestamp DESC")
         alerts = self._query_alerts("".join(query_parts), params)
 
         logger.debug(f"Retrieved {len(alerts)} alerts from database")

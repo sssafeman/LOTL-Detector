@@ -213,6 +213,58 @@ def test_get_alert_by_id_direct_lookup(temp_db):
         db.close()
 
 
+def test_export_honors_time_bounds(client, temp_db):
+    """S2 review finding 3: export ignored start_time/end_time."""
+    _seed(temp_db, [
+        ("WIN-801", "low", "windows", 5, datetime(2026, 1, 1, 10, 0, 0)),
+        ("WIN-802", "low", "windows", 6, datetime(2026, 6, 1, 10, 0, 0)),
+    ])
+    response = client.get(
+        "/api/export?kind=alerts&start_time=2026-05-01T00:00:00"
+    )
+    assert response.status_code == 200
+    lines = [
+        json.loads(line)
+        for line in response.get_data(as_text=True).strip().splitlines()
+    ]
+    assert [line["rule"]["id"] for line in lines] == ["WIN-802"]
+
+
+def test_export_rejects_invalid_time_bound(client):
+    response = client.get("/api/export?start_time=invalid-date")
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_incident_severity_is_validated(client):
+    """S2 review finding 5: incidents accepted any severity string."""
+    response = client.get("/api/incidents?severity=banana")
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_out_of_range_min_score_is_a_client_error(client):
+    """S2 review finding 5: 2**63 passed int() and blew up as an
+    OverflowError inside SQLite (500)."""
+    response = client.get("/api/alerts?min_score=9223372036854775808")
+    assert response.status_code == 400
+
+
+def test_get_alerts_without_limit_returns_all(temp_db):
+    """S2 review finding 10: the CLI unlimited mode (limit=None) must
+    not hit SQLite's LIMIT NULL datatype mismatch."""
+    _seed(temp_db, [
+        ("WIN-901", "low", "windows", 5, datetime(2026, 1, 1, 10, 0, 0)),
+        ("WIN-902", "low", "windows", 6, datetime(2026, 2, 1, 10, 0, 0)),
+        ("WIN-903", "low", "windows", 7, datetime(2026, 3, 1, 10, 0, 0)),
+    ])
+    db = AlertDatabase(temp_db)
+    try:
+        assert len(db.get_alerts(limit=None)) == 3
+    finally:
+        db.close()
+
+
 def _one_alert():
     event = Event(
         timestamp=datetime(2026, 6, 1, 10, 0, 0),

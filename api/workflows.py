@@ -27,6 +27,9 @@ DEFAULT_ALERT_LIMIT = 100
 DEFAULT_EXPORT_LIMIT = 1000
 DEFAULT_INCIDENT_LIMIT = 100
 MAX_BATCH_SIZE = 5000
+# SQLite binds 64-bit signed integers only; larger min_score values used to
+# reach the driver and raise OverflowError (500) (S2 review finding 5).
+SQLITE_INTEGER_MAX = 2**63 - 1
 
 
 class RequestValidationError(ValueError):
@@ -92,7 +95,9 @@ def _validate_alert_filters(args: Any) -> Tuple[Optional[str], Optional[str], Op
         raise RequestValidationError(
             "platform must be one of " + ", ".join(SUPPORTED_PLATFORMS)
         )
-    min_score = _parse_int_parameter(args, 'min_score', minimum=0)
+    min_score = _parse_int_parameter(
+        args, 'min_score', minimum=0, maximum=SQLITE_INTEGER_MAX
+    )
     return severity, platform, min_score
 
 
@@ -154,6 +159,11 @@ class ApiWorkflows:
         severity, platform, min_score = _validate_alert_filters(args)
         limit = _parse_limit_parameter(args, DEFAULT_EXPORT_LIMIT)
 
+        # Parse time bounds for both kinds so invalid values are rejected
+        # consistently; only the alerts query supports them today.
+        start_time = _parse_timestamp_parameter(args, 'start_time')
+        end_time = _parse_timestamp_parameter(args, 'end_time')
+
         if kind == 'incidents':
             records = database.get_incidents(
                 severity=severity,
@@ -163,6 +173,8 @@ class ApiWorkflows:
             )
         else:
             records = database.get_alerts(
+                start_time=start_time,
+                end_time=end_time,
                 severity=severity,
                 platform=platform,
                 min_score=min_score,
@@ -276,11 +288,12 @@ class ApiWorkflows:
     def query_incidents(self, args: Any) -> list[Dict[str, Any]]:
         """Apply incident query parameters with validated values."""
         database = self.components_provider().database
+        severity, platform, min_score = _validate_alert_filters(args)
         return database.get_incidents(
             chain_id=args.get('chain_id'),
-            severity=args.get('severity'),
-            platform=args.get('platform'),
-            min_score=_parse_int_parameter(args, 'min_score', minimum=0),
+            severity=severity,
+            platform=platform,
+            min_score=min_score,
             limit=_parse_limit_parameter(args, DEFAULT_INCIDENT_LIMIT),
         )
 
