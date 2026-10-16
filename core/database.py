@@ -421,6 +421,7 @@ class AlertDatabase:
         cursor = self.connection.cursor()
         cursor.execute(_CREATE_ALERTS_TABLE)
         self._migrate_schema()
+        self._verify_schema()
         statements = (
             _ALERT_INDEX_STATEMENTS
             + _SUPPRESSION_SCHEMA_STATEMENTS
@@ -473,6 +474,33 @@ class AlertDatabase:
 
         logger.info(f"Database schema migrated from version {current_version} "
                     f"to {pending[-1][0]}")
+
+    def _verify_schema(self) -> None:
+        """Fail loudly when the alerts table lacks columns this build needs.
+
+        Covers databases whose user_version claims a newer schema than
+        their actual shape; those previously initialized and then failed
+        on the first insert (S2 review finding 7).
+        """
+        cursor = self.connection.cursor()
+        cursor.execute("PRAGMA table_info(alerts)")
+        existing = {row[1] for row in cursor.fetchall()}
+
+        required = {
+            "id", "rule_id", "rule_name", "severity", "score", "platform",
+            "process_name", "command_line", "user", "parent_process_name",
+            "timestamp", "mitre_attack", "description", "response",
+            "event_data", "created_at",
+        }
+        required.update(name for name, _ in _ALERT_COLUMNS)
+        required.update(name for name, _ in _SCORING_EVIDENCE_COLUMNS)
+
+        missing = sorted(required - existing)
+        if missing:
+            raise MigrationError(
+                "Database schema is incompatible with this build; missing "
+                f"columns: {', '.join(missing)}. Refusing to start."
+            )
 
     def save_alert(self, alert: Alert) -> int:
         """

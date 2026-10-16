@@ -210,3 +210,19 @@ def test_failed_migration_aborts_and_rolls_back(legacy_db, monkeypatch):
     # The whole migration ran in one transaction, so nothing else stuck.
     assert "updated_at" not in columns
     assert version == 0
+
+
+def test_incompatible_schema_aborts_startup(tmp_path):
+    """S2 review finding 7: a v1-shaped database marked user_version=999
+    initialized fine and then failed on the first insert."""
+    path = tmp_path / "wrongver.db"
+    _create_legacy_db(str(path), rows=1)
+
+    conn = sqlite3.connect(str(path))
+    conn.execute("PRAGMA user_version = 999")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(MigrationError) as excinfo:
+        AlertDatabase(str(path))
+    assert "missing columns" in str(excinfo.value)
