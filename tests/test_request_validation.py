@@ -155,6 +155,32 @@ def test_suppression_valid_request_still_works(client):
     assert response.get_json()["status"] == "created"
 
 
+@pytest.mark.parametrize("scope_value", [[], ["x"], 5, "host-a"])
+def test_global_scope_rejects_scope_value(client, scope_value):
+    """S2 review finding 5: a non-null scope_value on global scope used
+    to reach the database CHECK constraint and return a 500."""
+    response = client.post("/api/suppressions", json={
+        "fingerprint": "fp-1",
+        "reason": "test",
+        "duration_hours": 24,
+        "scope": "global",
+        "scope_value": scope_value,
+    })
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_global_scope_accepts_empty_scope_value(client):
+    response = client.post("/api/suppressions", json={
+        "fingerprint": "fp-1",
+        "reason": "test",
+        "duration_hours": 24,
+        "scope": "global",
+        "scope_value": "",
+    })
+    assert response.status_code == 200
+
+
 def test_internal_errors_do_not_leak_exception_text(client, monkeypatch):
     from api.workflows import ApiWorkflows
 

@@ -410,6 +410,15 @@ class ApiWorkflows:
             raise RequestValidationError(
                 'scope_value must be a string and is required for host scope'
             )
+        if scope == 'global':
+            # A scope value on global scope used to reach the database
+            # CHECK constraint and surface as a 500 (S2 review finding 5).
+            if scope_value in (None, ''):
+                scope_value = None
+            else:
+                raise RequestValidationError(
+                    'scope_value must be omitted for global scope'
+                )
         if not reason:
             raise RequestValidationError('reason is required')
         if (
