@@ -163,6 +163,11 @@ _VALID_ALERT_STATES = frozenset({
 MAX_SUPPRESSION_DURATION_HOURS = 87600
 
 
+def _utcnow() -> datetime:
+    """Current time as aware UTC. Split out so tests can freeze it."""
+    return datetime.now(timezone.utc)
+
+
 def _as_utc(value: Any) -> Optional[datetime]:
     """Interpret a stored timestamp as an aware UTC datetime.
 
@@ -823,11 +828,17 @@ class AlertDatabase:
         two stored timestamp formats as text against CURRENT_TIMESTAMP
         misorders them ("T" sorts after a space), which kept expired
         suppressions active for the rest of the UTC day (finding E3).
+
+        The columns are cast to TEXT so the registered DATETIME converter
+        never raises mid-fetch on an unreadable stored value; such rows
+        are treated as inactive with a warning instead (S2 review
+        finding 4).
         """
-        now = datetime.now(timezone.utc)
+        now = _utcnow()
         cursor = self.connection.cursor()
         cursor.execute("""
-            SELECT id, starts_at, expires_at FROM suppressions
+            SELECT id, CAST(starts_at AS TEXT), CAST(expires_at AS TEXT)
+            FROM suppressions
             WHERE active = 1
               AND (
                   (scope = 'global' AND fingerprint = ?)

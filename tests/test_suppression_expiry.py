@@ -87,15 +87,44 @@ def test_expired_suppression_sqlite_format_is_inactive(db):
     assert db._is_suppressed("fp-host-1", "fp-host-1", "host-a") is False
 
 
-def test_expiry_boundary_is_strictly_in_the_future(db):
-    """At exactly now the suppression is over; one second later it is not."""
+def test_expiry_boundary_is_strictly_in_the_future(db, monkeypatch):
+    """At exactly now the suppression is over; one second later it is not.
+
+    The clock is frozen via the module's _utcnow hook so the boundary is
+    deterministic (S2 review note on the previous non-frozen version).
+    """
+    import core.database as database_module
+
+    frozen = datetime(2026, 10, 16, 12, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(database_module, "_utcnow", lambda: frozen)
+
     sid = _add(db)
 
-    _set_expiry(db, sid, _iso(datetime.now(timezone.utc)))
+    _set_expiry(db, sid, _iso(frozen))
     assert db._is_suppressed("fp-host-1", "fp-host-1", "host-a") is False
 
-    _set_expiry(db, sid, _iso(datetime.now(timezone.utc) + timedelta(seconds=1)))
+    _set_expiry(db, sid, _iso(frozen + timedelta(seconds=1)))
     assert db._is_suppressed("fp-host-1", "fp-host-1", "host-a") is True
+
+
+def test_unreadable_stored_timestamps_are_treated_as_inactive(db):
+    """S2 review finding 4: the DATETIME converter used to raise during
+    fetchall, before _as_utc could reject the value."""
+    sid = _add(db)
+    db.connection.execute(
+        "UPDATE suppressions SET expires_at = 'garbage' WHERE id = ?", (sid,)
+    )
+    db.connection.commit()
+
+    assert db._is_suppressed("fp-host-1", "fp-host-1", "host-a") is False
+
+    db.connection.execute(
+        "UPDATE suppressions SET expires_at = ?, starts_at = '0000-00-00' "
+        "WHERE id = ?",
+        (_iso(datetime.now(timezone.utc) + timedelta(hours=1)), sid),
+    )
+    db.connection.commit()
+    assert db._is_suppressed("fp-host-1", "fp-host-1", "host-a") is False
 
 
 def test_suppression_that_has_not_started_is_inactive(db):
